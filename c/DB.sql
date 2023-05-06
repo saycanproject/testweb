@@ -70,11 +70,11 @@ CREATE TABLE `x_member_roles` (
   `member_id` INT NOT NULL,
   `role` ENUM('visitor', 'admin','member','founder','auditor','reserved') NOT NULL DEFAULT 'member',
   FOREIGN KEY (`member_id`) REFERENCES `member`(`id`)
-);ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
 CREATE TABLE `x_business_approval` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
   `business_id` INT NOT NULL,
   `approval_status` ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
   FOREIGN KEY (`business_id`) REFERENCES `business`(`id`)
-);ENGINE=InnoDB DEFAULT CHARSET=utf8;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
