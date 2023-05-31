@@ -1,0 +1,1581 @@
+<!DOCTYPE html><html><head>  <title>Chat GPT: Build Investment Tracking System</title>  <meta name="generator" content="chatGPT Saving Bookmark"/><style>body {  background-color: rgb(32,33,35);  color: rgb(236,236,241);  font-size: 16px;  font-family: sans-serif;  line-height: 28px;  margin: -10px;}body > .w-full {  padding: 30px;}/* prompt */body > .w-full:nth-child(2n+1) {  background: rgb(52,53,65);}/* response */body > .w-full:nth-child(2n+2) {  background: rgb(68,70,84);}a, a:visited {  color: #7792cd;}pre {  margin: 0 0 1em 0;  display: inline-block;  width: 100%;}pre code.hljs {  margin-bottom: 1em;  border-radius: 5px;}.whitespace-pre-wrap {  white-space: pre-wrap;}.flex-col {  max-width: 850px;  margin: 0px auto;}</style><link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/default.min.css"/></head><body><div class="flex items-center justify-center gap-1 border-b border-black/10 bg-gray-50 p-3 text-gray-500 dark:border-gray-900/50 dark:bg-gray-700 dark:text-gray-300">Model: GPT-4</div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">I want to build an investment balance tracking system (web application) with php and mysql from scratch.It must use MVC design pattern and implement the router and loader to access and interact between files. In the beginning, the simplicity, logic and clarity are my first prioirties.
+Please first write the member login and register module for this system such that A web visitor can register to be a member, and after approved the registered memeber can be assigned to different roles.
+I currently have created 6 core tables for the database as this:
+CREATE TABLE `member` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `username` varchar(50) NOT NULL,
+  `password` char(60) NOT NULL,
+  `code` char(60) DEFAULT NULL,
+  `status` enum('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+  `role` set('root', 'admin', 'member', 'auditor', 'reserved') NOT NULL DEFAULT 'member',
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `username` (`username`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+CREATE TABLE `business` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `member_id` int NOT NULL,
+  `bizname` varchar(100) NOT NULL,
+  `description` text NOT NULL,
+  `status` enum('active', 'pending', 'rejected') NOT NULL DEFAULT 'pending',
+  `extra_info` json DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `member_id_index` (`member_id`),
+  FOREIGN KEY (`member_id`) REFERENCES `member`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+CREATE TABLE `funding` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `member_id` int NOT NULL,
+  `business_id` int NOT NULL,
+  `amount` decimal(10,2) NOT NULL,
+  `status` enum('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+  `extra_info` json DEFAULT NULL,
+  `date` date NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `business_id_index` (`business_id`),
+  KEY `member_id` (`member_id`),
+  FOREIGN KEY (`business_id`) REFERENCES `business` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY (`member_id`) REFERENCES `member` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+CREATE TABLE `relation` (
+  `member_id` int NOT NULL,
+  `business_id` int NOT NULL,
+  PRIMARY KEY (`member_id`,`business_id`),
+  KEY `relation_member_id_index` (`member_id`),
+  KEY `relation_business_id_index` (`business_id`),
+  FOREIGN KEY (`member_id`) REFERENCES `member` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY (`business_id`) REFERENCES `business` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+CREATE TABLE `records` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `member_id` int NOT NULL,
+  `business_id` int NOT NULL,
+  `category` enum('income','expense') NOT NULL,
+  `amount` decimal(10,2) NOT NULL,
+  `description` text,
+  `extra_info` json DEFAULT NULL,
+  `date` date NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `business_id_index` (`business_id`),
+  KEY `member_id` (`member_id`),
+  FOREIGN KEY (`business_id`) REFERENCES `business` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY (`member_id`) REFERENCES `member` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+CREATE TABLE `settings` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `option_name` varchar(255) NOT NULL,
+  `option_value` text NOT NULL,
+  `json_options` json DEFAULT NULL,
+  `applies_to` varchar(255) DEFAULT NULL,
+  `description` text,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `option_name` (`option_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+And a mysqli helper class like this:
+&lt;?php
+class DB {
+    public $link;
+
+    public function __construct($server="localhost",$user="root",$pass="tt1201",$database="test") {
+        $this-&gt;link = new mysqli($server,$user,$pass,$database);
+
+        if ($this-&gt;link-&gt;connect_error) {
+            trigger_error('Error: Could not make a database link (' . $this-&gt;link-&gt;connect_errno . ') ' . $this-&gt;link-&gt;connect_error);
+            exit();
+        }
+
+        $this-&gt;link-&gt;set_charset("utf8");
+        $this-&gt;link-&gt;query("SET SQL_MODE = ''");
+    }
+
+    public function query($sql) {
+        $query = $this-&gt;link-&gt;query($sql);
+
+        if (!$this-&gt;link-&gt;errno) {
+            if ($query instanceof mysqli_result) {
+                $data = array();
+
+                while ($row = $query-&gt;fetch_assoc()) {
+                    $data[] = $row;
+                }
+
+                $result = new stdClass();
+                $result-&gt;num_rows = $query-&gt;num_rows;
+                $result-&gt;row = isset($data[0]) ? $data[0] : array();
+                $result-&gt;rows = $data;
+
+                $query-&gt;close();
+
+                return $result;
+            } else {
+                return true;
+            }
+        } else {
+            trigger_error('Error: ' . $this-&gt;link-&gt;error  . '&lt;br /&gt;Error No: ' . $this-&gt;link-&gt;errno . '&lt;br /&gt;' . $sql);
+        }
+    }
+
+    public function escape($value) {
+        return $this-&gt;link-&gt;real_escape_string($value);
+    }
+
+    public function countAffected() {
+        return $this-&gt;link-&gt;affected_rows;
+    }
+
+    public function getLastId() {
+        return $this-&gt;link-&gt;insert_id;
+    }
+
+    public function __destruct() {
+        $this-&gt;link-&gt;close();
+    }
+}
+?&gt;
+Then I used a php script to inserted a root user into the member table like this:
+&lt;?php
+require 'm/DB.php'; // Load the DB class
+
+$db = new DB(); // Create a new DB object
+
+// Define username and password
+$username = "root";
+$password = "1"; // Replace with your actual password
+
+// Hash the password
+$hashed_password = password_hash($password, PASSWORD_DEFAULT);
+
+// Define user status and roles
+$status = "approved";
+$role = "root,admin";
+
+// Build the SQL query
+$sql = "INSERT INTO `member` (username, password, code, status, role) VALUES ('$username', '$hashed_password', '', '$status', '$role')";
+
+// Execute the query
+$result = $db-&gt;query($sql);
+
+// Check the result
+if ($result === TRUE) {
+    echo "Root user created successfully";
+} else {
+    echo "Error creating root user: " . $db-&gt;link-&gt;error;
+}
+?&gt;
+
+After successfully inserted the root user I deleted the root user insertion php file completely. 
+As the foundation of this investment balance tracking system is ready. Please first write the user log in and register module code for me, such that a visitor can register to be a member with a generated random code number to recover it's password later on. Notice that you must use MVC design pattern and implement the router and loader to access and interact between files. I have created 3 folders in the root directory of this system, folder c for controller, folder m for model which has DB.php in it, and folder v for view. And there are there empty php files index.php, loader.php and router.php I already put in the root directory. You have to first analyze all of my description, instructions, directory and file structure and keep the simplicity, extensibility and applicability in mind, then write the code for me now.</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>To build this system with PHP and MySQL from scratch, we'll follow the MVC (Model-View-Controller) design pattern. In this pattern:</p><ol><li>Models represent your data structures, usually by interfacing with the database.</li><li>Views contain the HTML/CSS that make up your user interface.</li><li>Controllers handle requests, manipulate models, and decide which views to render.</li></ol><p>You have three folders: <code>c</code> for controllers, <code>m</code> for models, and <code>v</code> for views. You also have <code>index.php</code>, <code>loader.php</code>, and <code>router.php</code> files in your root directory.</p><p>First, let's start with your <code>loader.php</code> file. This file will help to load all necessary classes.</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-comment">// loader.php</span>
+
+<span class="hljs-title function_ invoke__">spl_autoload_register</span>(function(<span class="hljs-variable">$class_name</span>){
+    <span class="hljs-keyword">if</span>(<span class="hljs-title function_ invoke__">file_exists</span>(<span class="hljs-string">'m/'</span> . <span class="hljs-variable">$class_name</span> . <span class="hljs-string">'.php'</span>)) {
+        <span class="hljs-keyword">require_once</span> <span class="hljs-string">'m/'</span> . <span class="hljs-variable">$class_name</span> . <span class="hljs-string">'.php'</span>;
+    } <span class="hljs-keyword">else</span> <span class="hljs-keyword">if</span>(<span class="hljs-title function_ invoke__">file_exists</span>(<span class="hljs-string">'c/'</span> . <span class="hljs-variable">$class_name</span> . <span class="hljs-string">'.php'</span>)) {
+        <span class="hljs-keyword">require_once</span> <span class="hljs-string">'c/'</span> . <span class="hljs-variable">$class_name</span> . <span class="hljs-string">'.php'</span>;
+    }
+});
+</code></div></div></pre><p>Then we'll implement the routing logic in <code>router.php</code>.</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-comment">// router.php</span>
+
+<span class="hljs-keyword">require_once</span> <span class="hljs-string">'loader.php'</span>;
+
+<span class="hljs-variable">$controllerName</span> = <span class="hljs-variable">$_REQUEST</span>[<span class="hljs-string">'controller'</span>] ?? <span class="hljs-string">'User'</span>;
+<span class="hljs-variable">$actionName</span> = <span class="hljs-variable">$_REQUEST</span>[<span class="hljs-string">'action'</span>] ?? <span class="hljs-string">'index'</span>;
+
+<span class="hljs-variable">$controllerClass</span> = <span class="hljs-title function_ invoke__">ucfirst</span>(<span class="hljs-variable">$controllerName</span>) . <span class="hljs-string">"Controller"</span>;
+
+<span class="hljs-keyword">if</span> (!<span class="hljs-title function_ invoke__">class_exists</span>(<span class="hljs-variable">$controllerClass</span>)) {
+    <span class="hljs-keyword">die</span>(<span class="hljs-string">"Controller does not exist"</span>);
+}
+
+<span class="hljs-variable">$controller</span> = <span class="hljs-keyword">new</span> <span class="hljs-variable">$controllerClass</span>;
+
+<span class="hljs-keyword">if</span> (!<span class="hljs-title function_ invoke__">method_exists</span>(<span class="hljs-variable">$controller</span>, <span class="hljs-variable">$actionName</span>)) {
+    <span class="hljs-keyword">die</span>(<span class="hljs-string">"Action does not exist"</span>);
+}
+
+<span class="hljs-variable">$controller</span>-&gt;<span class="hljs-variable">$actionName</span>();
+</code></div></div></pre><p>In <code>index.php</code>, we'll include <code>router.php</code> to initialize our routing.</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-comment">// index.php</span>
+
+<span class="hljs-keyword">require_once</span> <span class="hljs-string">'router.php'</span>;
+</code></div></div></pre><p>Now, let's implement a <code>UserController</code> in the <code>c</code> folder that handles user-related actions such as register and login.</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-comment">// c/UserController.php</span>
+
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">UserController</span> </span>{
+
+    <span class="hljs-keyword">private</span> <span class="hljs-variable">$db</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">__construct</span>() </span>{
+        <span class="hljs-variable language_">$this</span>-&gt;db = <span class="hljs-keyword">new</span> <span class="hljs-title function_ invoke__">DB</span>();
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">register</span>() </span>{
+        <span class="hljs-comment">// You can use this as a starting point to implement your registration logic here</span>
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">login</span>() </span>{
+        <span class="hljs-comment">// You can use this as a starting point to implement your login logic here</span>
+    }
+}
+</code></div></div></pre><p>We will now implement views for the login and registration. Create two files <code>login.php</code> and <code>register.php</code> in the <code>v</code> folder:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-comment">// v/register.php</span>
+
+<span class="hljs-comment">// HTML form for registration goes here</span>
+
+</code></div></div></pre><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-comment">// v/login.php</span>
+
+<span class="hljs-comment">// HTML form for login goes here</span>
+
+</code></div></div></pre><p>Next, update your <code>UserController</code> to render these views:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-comment">// c/UserController.php</span>
+
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">UserController</span> </span>{
+
+    <span class="hljs-keyword">private</span> <span class="hljs-variable">$db</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">__construct</span>() </span>{
+        <span class="hljs-variable language_">$this</span>-&gt;db = <span class="hljs-keyword">new</span> <span class="hljs-title function_ invoke__">DB</span>();
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">register</span>() </span>{
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+            <span class="hljs-comment">// Register the user</span>
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-comment">// Display the registration form</span>
+            <span class="hljs-keyword">include</span> <span class="hljs-string">'v/register.php'</span>;
+        }
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">login</span>() </span>{
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+            <span class="hljs-comment">// Authenticate the user</span>
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-comment">// Display the login form</span>
+            <span class="hljs-keyword">include</span> <span class="hljs-string">'v/login.php'</span>;
+        }
+    }
+}
+</code></div></div></pre><p>This is a basic structure to get you started. You need to implement the actual logic of user registration and authentication according to your application's requirements.</p><p>To add a new user, you will need to write a SQL insert query and use the <code>query</code> method from your DB class. To authenticate a user, you will need</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">I get Action does not exist visiting index.php</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>Yes, that's because your router tries to access the 'index' method of the 'UserController' by default, but there is no 'index' method defined in 'UserController'.</p><p>For a quick fix, you could define a default 'index' method in the 'UserController' to redirect to 'login' or 'register' methods.</p><p>Update your <code>UserController</code> like so:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-comment">// c/UserController.php</span>
+
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">UserController</span> </span>{
+
+    <span class="hljs-keyword">private</span> <span class="hljs-variable">$db</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">__construct</span>() </span>{
+        <span class="hljs-variable language_">$this</span>-&gt;db = <span class="hljs-keyword">new</span> <span class="hljs-title function_ invoke__">DB</span>();
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">index</span>() </span>{
+        <span class="hljs-variable language_">$this</span>-&gt;<span class="hljs-title function_ invoke__">login</span>();
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">register</span>() </span>{
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+            <span class="hljs-comment">// Register the user</span>
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-comment">// Display the registration form</span>
+            <span class="hljs-keyword">include</span> <span class="hljs-string">'v/register.php'</span>;
+        }
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">login</span>() </span>{
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+            <span class="hljs-comment">// Authenticate the user</span>
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-comment">// Display the login form</span>
+            <span class="hljs-keyword">include</span> <span class="hljs-string">'v/login.php'</span>;
+        }
+    }
+}
+</code></div></div></pre><p>Now, when you visit <code>index.php</code> without providing a controller and action, it defaults to the 'login' action of the 'UserController'. Please ensure that the 'login.php' and 'register.php' views are created in the 'v' directory, as these are expected by the 'login' and 'register' actions.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">I've had empty login.php and register.php in the v folder, please write the respective html form for me</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>Sure, here are some basic HTML forms for the <code>login.php</code> and <code>register.php</code> views.</p><p><code>login.php</code>:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>html</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-html"><span class="hljs-comment">&lt;!-- v/login.php --&gt;</span>
+
+<span class="hljs-meta">&lt;!DOCTYPE <span class="hljs-keyword">html</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">html</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">head</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">title</span>&gt;</span>Login<span class="hljs-tag">&lt;/<span class="hljs-name">title</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-name">head</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">body</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">h2</span>&gt;</span>Login<span class="hljs-tag">&lt;/<span class="hljs-name">h2</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">form</span> <span class="hljs-attr">action</span>=<span class="hljs-string">"?controller=User&amp;action=login"</span> <span class="hljs-attr">method</span>=<span class="hljs-string">"post"</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">label</span> <span class="hljs-attr">for</span>=<span class="hljs-string">"username"</span>&gt;</span>Username:<span class="hljs-tag">&lt;/<span class="hljs-name">label</span>&gt;</span><span class="hljs-tag">&lt;<span class="hljs-name">br</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">input</span> <span class="hljs-attr">type</span>=<span class="hljs-string">"text"</span> <span class="hljs-attr">id</span>=<span class="hljs-string">"username"</span> <span class="hljs-attr">name</span>=<span class="hljs-string">"username"</span>&gt;</span><span class="hljs-tag">&lt;<span class="hljs-name">br</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">label</span> <span class="hljs-attr">for</span>=<span class="hljs-string">"password"</span>&gt;</span>Password:<span class="hljs-tag">&lt;/<span class="hljs-name">label</span>&gt;</span><span class="hljs-tag">&lt;<span class="hljs-name">br</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">input</span> <span class="hljs-attr">type</span>=<span class="hljs-string">"password"</span> <span class="hljs-attr">id</span>=<span class="hljs-string">"password"</span> <span class="hljs-attr">name</span>=<span class="hljs-string">"password"</span>&gt;</span><span class="hljs-tag">&lt;<span class="hljs-name">br</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">input</span> <span class="hljs-attr">type</span>=<span class="hljs-string">"submit"</span> <span class="hljs-attr">value</span>=<span class="hljs-string">"Submit"</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-name">form</span>&gt;</span> 
+<span class="hljs-tag">&lt;/<span class="hljs-name">body</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-name">html</span>&gt;</span>
+</code></div></div></pre><p><code>register.php</code>:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>html</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-html"><span class="hljs-comment">&lt;!-- v/register.php --&gt;</span>
+
+<span class="hljs-meta">&lt;!DOCTYPE <span class="hljs-keyword">html</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">html</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">head</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">title</span>&gt;</span>Register<span class="hljs-tag">&lt;/<span class="hljs-name">title</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-name">head</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">body</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">h2</span>&gt;</span>Register<span class="hljs-tag">&lt;/<span class="hljs-name">h2</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">form</span> <span class="hljs-attr">action</span>=<span class="hljs-string">"?controller=User&amp;action=register"</span> <span class="hljs-attr">method</span>=<span class="hljs-string">"post"</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">label</span> <span class="hljs-attr">for</span>=<span class="hljs-string">"username"</span>&gt;</span>Username:<span class="hljs-tag">&lt;/<span class="hljs-name">label</span>&gt;</span><span class="hljs-tag">&lt;<span class="hljs-name">br</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">input</span> <span class="hljs-attr">type</span>=<span class="hljs-string">"text"</span> <span class="hljs-attr">id</span>=<span class="hljs-string">"username"</span> <span class="hljs-attr">name</span>=<span class="hljs-string">"username"</span>&gt;</span><span class="hljs-tag">&lt;<span class="hljs-name">br</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">label</span> <span class="hljs-attr">for</span>=<span class="hljs-string">"password"</span>&gt;</span>Password:<span class="hljs-tag">&lt;/<span class="hljs-name">label</span>&gt;</span><span class="hljs-tag">&lt;<span class="hljs-name">br</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">input</span> <span class="hljs-attr">type</span>=<span class="hljs-string">"password"</span> <span class="hljs-attr">id</span>=<span class="hljs-string">"password"</span> <span class="hljs-attr">name</span>=<span class="hljs-string">"password"</span>&gt;</span><span class="hljs-tag">&lt;<span class="hljs-name">br</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">input</span> <span class="hljs-attr">type</span>=<span class="hljs-string">"submit"</span> <span class="hljs-attr">value</span>=<span class="hljs-string">"Submit"</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-name">form</span>&gt;</span> 
+<span class="hljs-tag">&lt;/<span class="hljs-name">body</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-name">html</span>&gt;</span>
+</code></div></div></pre><p>These forms will submit a POST request to the same page (<code>index.php</code>) with controller as <code>User</code> and action as either <code>login</code> or <code>register</code>, depending on the form. The <code>UserController</code> will then handle the POST request and process the form data.</p><p>Please adjust these forms to match your specific needs and styles.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">I get a blank page after sent the login form from url http://localhost/cf/?controller=User&amp;action=login (I'm developing this system in my localhost root folder as cf), and whatever I put in the username and password it will always result a blank page, doesn't matter if my login data are correct or wrong. what's going on here and how to fix.</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>The issue seems to be that we don't have any logic yet in the <code>login</code> and <code>register</code> methods of <code>UserController</code>. When a form is submitted, these methods should process the form data, but currently they do nothing when the request method is 'POST'.</p><p>Let's add some basic logic for <code>login</code>. This will include checking the database for a user with the provided username, and if a user is found, checking if the provided password matches the password in the database.</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-comment">// c/UserController.php</span>
+
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">UserController</span> </span>{
+
+    <span class="hljs-keyword">private</span> <span class="hljs-variable">$db</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">__construct</span>() </span>{
+        <span class="hljs-variable language_">$this</span>-&gt;db = <span class="hljs-keyword">new</span> <span class="hljs-title function_ invoke__">DB</span>();
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">index</span>() </span>{
+        <span class="hljs-variable language_">$this</span>-&gt;<span class="hljs-title function_ invoke__">login</span>();
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">register</span>() </span>{
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+            <span class="hljs-comment">// Register the user</span>
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-comment">// Display the registration form</span>
+            <span class="hljs-keyword">include</span> <span class="hljs-string">'v/register.php'</span>;
+        }
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">login</span>() </span>{
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+            <span class="hljs-comment">// Authenticate the user</span>
+
+            <span class="hljs-variable">$username</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">escape</span>(<span class="hljs-variable">$_POST</span>[<span class="hljs-string">'username'</span>]);
+            <span class="hljs-variable">$password</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'password'</span>]; <span class="hljs-comment">// Do not escape password; this could interfere with password verification</span>
+
+            <span class="hljs-variable">$result</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">query</span>(<span class="hljs-string">"SELECT * FROM `member` WHERE `username` = '<span class="hljs-subst">$username</span>'"</span>);
+
+            <span class="hljs-keyword">if</span> (<span class="hljs-variable">$result</span>-&gt;num_rows &gt; <span class="hljs-number">0</span>) {
+                <span class="hljs-variable">$user</span> = <span class="hljs-variable">$result</span>-&gt;row;
+
+                <span class="hljs-keyword">if</span> (<span class="hljs-title function_ invoke__">password_verify</span>(<span class="hljs-variable">$password</span>, <span class="hljs-variable">$user</span>[<span class="hljs-string">'password'</span>])) {
+                    <span class="hljs-keyword">echo</span> <span class="hljs-string">"User authenticated successfully."</span>;
+                    <span class="hljs-comment">// Here, you could start a session and store user data, then redirect to another page</span>
+                } <span class="hljs-keyword">else</span> {
+                    <span class="hljs-keyword">echo</span> <span class="hljs-string">"Incorrect password."</span>;
+                    <span class="hljs-comment">// Here, you could redirect back to the login page with a message about the error</span>
+                }
+            } <span class="hljs-keyword">else</span> {
+                <span class="hljs-keyword">echo</span> <span class="hljs-string">"No user found with this username."</span>;
+                <span class="hljs-comment">// Here, you could redirect back to the login page with a message about the error</span>
+            }
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-comment">// Display the login form</span>
+            <span class="hljs-keyword">include</span> <span class="hljs-string">'v/login.php'</span>;
+        }
+    }
+}
+</code></div></div></pre><p>This will provide basic functionality for the login form. It's important to note that you will want to implement better error handling and user feedback in your actual application. The above code is a simplified example.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">The code worked without errors. I have an empty profile.php in my v folder, please write the profile.php code such that when a user successfully logged-in, it will show the user status with editable for each entity that I will be working on it later.</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>Sure, I'll provide a basic profile.php view. We'll add some code in the UserController's login method to store the user data in a session and redirect to the profile page.</p><p>First, update the login method in your UserController:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-comment">// c/UserController.php</span>
+
+<span class="hljs-comment">// ...</span>
+
+<span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">login</span>() </span>{
+    <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+        <span class="hljs-comment">// Authenticate the user</span>
+
+        <span class="hljs-variable">$username</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">escape</span>(<span class="hljs-variable">$_POST</span>[<span class="hljs-string">'username'</span>]);
+        <span class="hljs-variable">$password</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'password'</span>]; <span class="hljs-comment">// Do not escape password; this could interfere with password verification</span>
+
+        <span class="hljs-variable">$result</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">query</span>(<span class="hljs-string">"SELECT * FROM `member` WHERE `username` = '<span class="hljs-subst">$username</span>'"</span>);
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$result</span>-&gt;num_rows &gt; <span class="hljs-number">0</span>) {
+            <span class="hljs-variable">$user</span> = <span class="hljs-variable">$result</span>-&gt;row;
+
+            <span class="hljs-keyword">if</span> (<span class="hljs-title function_ invoke__">password_verify</span>(<span class="hljs-variable">$password</span>, <span class="hljs-variable">$user</span>[<span class="hljs-string">'password'</span>])) {
+                <span class="hljs-comment">// Start the session and store user data</span>
+                <span class="hljs-title function_ invoke__">session_start</span>();
+                <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'user'</span>] = <span class="hljs-variable">$user</span>;
+
+                <span class="hljs-comment">// Redirect to profile page</span>
+                <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: index.php?controller=User&amp;action=profile'</span>);
+                <span class="hljs-keyword">exit</span>;
+            } <span class="hljs-keyword">else</span> {
+                <span class="hljs-keyword">echo</span> <span class="hljs-string">"Incorrect password."</span>;
+                <span class="hljs-comment">// Here, you could redirect back to the login page with a message about the error</span>
+            }
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-keyword">echo</span> <span class="hljs-string">"No user found with this username."</span>;
+            <span class="hljs-comment">// Here, you could redirect back to the login page with a message about the error</span>
+        }
+    } <span class="hljs-keyword">else</span> {
+        <span class="hljs-comment">// Display the login form</span>
+        <span class="hljs-keyword">include</span> <span class="hljs-string">'v/login.php'</span>;
+    }
+}
+
+<span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">profile</span>() </span>{
+    <span class="hljs-comment">// Start the session</span>
+    <span class="hljs-title function_ invoke__">session_start</span>();
+
+    <span class="hljs-keyword">if</span> (<span class="hljs-keyword">isset</span>(<span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'user'</span>])) {
+        <span class="hljs-comment">// If user is logged in, display the profile page</span>
+        <span class="hljs-keyword">include</span> <span class="hljs-string">'v/profile.php'</span>;
+    } <span class="hljs-keyword">else</span> {
+        <span class="hljs-comment">// If user is not logged in, redirect to the login page</span>
+        <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: index.php?controller=User&amp;action=login'</span>);
+        <span class="hljs-keyword">exit</span>;
+    }
+}
+
+<span class="hljs-comment">// ...</span>
+</code></div></div></pre><p>Now, you can create the <code>profile.php</code> view:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php">&lt;!-- v/profile.php --&gt;
+
+<span class="hljs-meta">&lt;?php</span>
+<span class="hljs-title function_ invoke__">session_start</span>(); <span class="hljs-comment">// start the session</span>
+<span class="hljs-meta">?&gt;</span>
+
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+    &lt;title&gt;Profile&lt;/title&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;h2&gt;Profile&lt;/h2&gt;
+
+    &lt;form action=<span class="hljs-string">"?controller=User&amp;action=updateProfile"</span> method=<span class="hljs-string">"post"</span>&gt;
+        &lt;label <span class="hljs-keyword">for</span>=<span class="hljs-string">"username"</span>&gt;Username:&lt;/label&gt;&lt;br&gt;
+        &lt;input type=<span class="hljs-string">"text"</span> id=<span class="hljs-string">"username"</span> name=<span class="hljs-string">"username"</span> value=<span class="hljs-string">"&lt;?php echo <span class="hljs-subst">$_SESSION</span>['user']['username']; ?&gt;"</span> disabled&gt;&lt;br&gt;
+
+        &lt;label <span class="hljs-keyword">for</span>=<span class="hljs-string">"status"</span>&gt;Status:&lt;/label&gt;&lt;br&gt;
+        &lt;input type=<span class="hljs-string">"text"</span> id=<span class="hljs-string">"status"</span> name=<span class="hljs-string">"status"</span> value=<span class="hljs-string">"&lt;?php echo <span class="hljs-subst">$_SESSION</span>['user']['status']; ?&gt;"</span>&gt;&lt;br&gt;
+
+        &lt;label <span class="hljs-keyword">for</span>=<span class="hljs-string">"role"</span>&gt;Role:&lt;/label&gt;&lt;br&gt;
+        &lt;input type=<span class="hljs-string">"text"</span> id=<span class="hljs-string">"role"</span> name=<span class="hljs-string">"role"</span> value=<span class="hljs-string">"&lt;?php echo <span class="hljs-subst">$_SESSION</span>['user']['role']; ?&gt;"</span>&gt;&lt;br&gt;
+
+        &lt;input type=<span class="hljs-string">"submit"</span> value=<span class="hljs-string">"Update"</span>&gt;
+    &lt;/form&gt; 
+&lt;/body&gt;
+&lt;/html&gt;
+</code></div></div></pre><p>In this profile view, we are displaying the user's username, status, and role. Note that the username field is disabled; it cannot be edited by the user. The user can edit their status and role and click "Update" to submit the form. The form will POST to the <code>updateProfile</code> action of <code>UserController</code>, which you would need to implement.</p><p>Please note, in a real system, roles are usually not editable by users directly as this can cause security issues. It's better to handle user roles administratively.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">ok it look right, and I've put the code into profile.php. My UserController.php was like this:
+&lt;?php
+class UserController {
+
+    private $db;
+
+    public function __construct() {
+        $this-&gt;db = new DB();
+    }
+
+    public function index() {
+        $this-&gt;login();
+    }
+
+    public function register() {
+        if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+            // Register the user
+        } else {
+            // Display the registration form
+            include 'v/register.php';
+        }
+    }
+
+    public function login() {
+        if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+            // Authenticate the user
+
+            $username = $this-&gt;db-&gt;escape($_POST['username']);
+            $password = $_POST['password']; // Do not escape password; this could interfere with password verification
+
+            $result = $this-&gt;db-&gt;query("SELECT * FROM `member` WHERE `username` = '$username'");
+
+            if ($result-&gt;num_rows &gt; 0) {
+                $user = $result-&gt;row;
+
+                if (password_verify($password, $user['password'])) {
+                    echo "User authenticated successfully.";
+                    // Here, you could start a session and store user data, then redirect to another page
+                } else {
+                    echo "Incorrect password.";
+                    // Here, you could redirect back to the login page with a message about the error
+                }
+            } else {
+                echo "No user found with this username.";
+                // Here, you could redirect back to the login page with a message about the error
+            }
+        } else {
+            // Display the login form
+            include 'v/login.php';
+        }
+    }
+}
+Please update the UserController class and put everything together for me. Don't leave out the &lt;php? part, so I can just copy and paste the whole code.
+</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>Absolutely, here's your updated UserController with the added methods for profile handling and the necessary session management for login:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-meta">&lt;?php</span>
+<span class="hljs-keyword">require_once</span> <span class="hljs-string">'m/DB.php'</span>;
+
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">UserController</span> </span>{
+
+    <span class="hljs-keyword">private</span> <span class="hljs-variable">$db</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">__construct</span>() </span>{
+        <span class="hljs-variable language_">$this</span>-&gt;db = <span class="hljs-keyword">new</span> <span class="hljs-title function_ invoke__">DB</span>();
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">index</span>() </span>{
+        <span class="hljs-variable language_">$this</span>-&gt;<span class="hljs-title function_ invoke__">login</span>();
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">register</span>() </span>{
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+            <span class="hljs-comment">// Register the user</span>
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-comment">// Display the registration form</span>
+            <span class="hljs-keyword">include</span> <span class="hljs-string">'v/register.php'</span>;
+        }
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">login</span>() </span>{
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+            <span class="hljs-comment">// Authenticate the user</span>
+            <span class="hljs-variable">$username</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">escape</span>(<span class="hljs-variable">$_POST</span>[<span class="hljs-string">'username'</span>]);
+            <span class="hljs-variable">$password</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'password'</span>]; <span class="hljs-comment">// Do not escape password; this could interfere with password verification</span>
+
+            <span class="hljs-variable">$result</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">query</span>(<span class="hljs-string">"SELECT * FROM `member` WHERE `username` = '<span class="hljs-subst">$username</span>'"</span>);
+
+            <span class="hljs-keyword">if</span> (<span class="hljs-variable">$result</span>-&gt;num_rows &gt; <span class="hljs-number">0</span>) {
+                <span class="hljs-variable">$user</span> = <span class="hljs-variable">$result</span>-&gt;row;
+
+                <span class="hljs-keyword">if</span> (<span class="hljs-title function_ invoke__">password_verify</span>(<span class="hljs-variable">$password</span>, <span class="hljs-variable">$user</span>[<span class="hljs-string">'password'</span>])) {
+                    <span class="hljs-comment">// Start the session and store user data</span>
+                    <span class="hljs-title function_ invoke__">session_start</span>();
+                    <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'user'</span>] = <span class="hljs-variable">$user</span>;
+
+                    <span class="hljs-comment">// Redirect to profile page</span>
+                    <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: index.php?controller=User&amp;action=profile'</span>);
+                    <span class="hljs-keyword">exit</span>;
+                } <span class="hljs-keyword">else</span> {
+                    <span class="hljs-keyword">echo</span> <span class="hljs-string">"Incorrect password."</span>;
+                    <span class="hljs-comment">// Here, you could redirect back to the login page with a message about the error</span>
+                }
+            } <span class="hljs-keyword">else</span> {
+                <span class="hljs-keyword">echo</span> <span class="hljs-string">"No user found with this username."</span>;
+                <span class="hljs-comment">// Here, you could redirect back to the login page with a message about the error</span>
+            }
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-comment">// Display the login form</span>
+            <span class="hljs-keyword">include</span> <span class="hljs-string">'v/login.php'</span>;
+        }
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">profile</span>() </span>{
+        <span class="hljs-comment">// Start the session</span>
+        <span class="hljs-title function_ invoke__">session_start</span>();
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-keyword">isset</span>(<span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'user'</span>])) {
+            <span class="hljs-comment">// If user is logged in, display the profile page</span>
+            <span class="hljs-keyword">include</span> <span class="hljs-string">'v/profile.php'</span>;
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-comment">// If user is not logged in, redirect to the login page</span>
+            <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: index.php?controller=User&amp;action=login'</span>);
+            <span class="hljs-keyword">exit</span>;
+        }
+    }
+}
+</code></div></div></pre><p>Please ensure your server is configured to support and handle sessions, and you're not outputting any content before running session_start(), as this can prevent headers from being sent and disrupt the session management and redirection.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">the system code is working now, but I want to put the database queries into the m folder, which is for model, and make the UserController class only does the controlling part, hence make the system more mvc  style, and more flexible and extensible later on. please make these changes accordingly. </div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>That's a great move! Let's refactor your code to make it adhere more closely to the MVC design pattern.</p><p>Here's how you can modify your DB class to act as a User model:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-meta">&lt;?php</span>
+<span class="hljs-comment">// m/User.php</span>
+<span class="hljs-keyword">require_once</span> <span class="hljs-string">'m/DB.php'</span>;
+
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">User</span> </span>{
+
+    <span class="hljs-keyword">private</span> <span class="hljs-variable">$db</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">__construct</span>() </span>{
+        <span class="hljs-variable language_">$this</span>-&gt;db = <span class="hljs-keyword">new</span> <span class="hljs-title function_ invoke__">DB</span>();
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">find</span>(<span class="hljs-params"><span class="hljs-variable">$username</span></span>) </span>{
+        <span class="hljs-variable">$username</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">escape</span>(<span class="hljs-variable">$username</span>);
+        <span class="hljs-variable">$result</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">query</span>(<span class="hljs-string">"SELECT * FROM `member` WHERE `username` = '<span class="hljs-subst">$username</span>'"</span>);
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$result</span>-&gt;num_rows &gt; <span class="hljs-number">0</span>) {
+            <span class="hljs-keyword">return</span> <span class="hljs-variable">$result</span>-&gt;row;
+        }
+
+        <span class="hljs-keyword">return</span> <span class="hljs-literal">false</span>;
+    }
+}
+</code></div></div></pre><p>Then, you can modify your UserController to use this new User model:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-meta">&lt;?php</span>
+<span class="hljs-comment">// c/UserController.php</span>
+<span class="hljs-keyword">require_once</span> <span class="hljs-string">'m/User.php'</span>;
+
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">UserController</span> </span>{
+
+    <span class="hljs-keyword">private</span> <span class="hljs-variable">$user</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">__construct</span>() </span>{
+        <span class="hljs-variable language_">$this</span>-&gt;user = <span class="hljs-keyword">new</span> <span class="hljs-title class_">User</span>();
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">index</span>() </span>{
+        <span class="hljs-variable language_">$this</span>-&gt;<span class="hljs-title function_ invoke__">login</span>();
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">register</span>() </span>{
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+            <span class="hljs-comment">// Register the user</span>
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-comment">// Display the registration form</span>
+            <span class="hljs-keyword">include</span> <span class="hljs-string">'v/register.php'</span>;
+        }
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">login</span>() </span>{
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+            <span class="hljs-comment">// Authenticate the user</span>
+            <span class="hljs-variable">$user</span> = <span class="hljs-variable language_">$this</span>-&gt;user-&gt;<span class="hljs-title function_ invoke__">find</span>(<span class="hljs-variable">$_POST</span>[<span class="hljs-string">'username'</span>]);
+            
+            <span class="hljs-keyword">if</span> (<span class="hljs-variable">$user</span>) {
+                <span class="hljs-keyword">if</span> (<span class="hljs-title function_ invoke__">password_verify</span>(<span class="hljs-variable">$_POST</span>[<span class="hljs-string">'password'</span>], <span class="hljs-variable">$user</span>[<span class="hljs-string">'password'</span>])) {
+                    <span class="hljs-comment">// Start the session and store user data</span>
+                    <span class="hljs-title function_ invoke__">session_start</span>();
+                    <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'user'</span>] = <span class="hljs-variable">$user</span>;
+
+                    <span class="hljs-comment">// Redirect to profile page</span>
+                    <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: index.php?controller=User&amp;action=profile'</span>);
+                    <span class="hljs-keyword">exit</span>;
+                } <span class="hljs-keyword">else</span> {
+                    <span class="hljs-keyword">echo</span> <span class="hljs-string">"Incorrect password."</span>;
+                    <span class="hljs-comment">// Here, you could redirect back to the login page with a message about the error</span>
+                }
+            } <span class="hljs-keyword">else</span> {
+                <span class="hljs-keyword">echo</span> <span class="hljs-string">"No user found with this username."</span>;
+                <span class="hljs-comment">// Here, you could redirect back to the login page with a message about the error</span>
+            }
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-comment">// Display the login form</span>
+            <span class="hljs-keyword">include</span> <span class="hljs-string">'v/login.php'</span>;
+        }
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">profile</span>() </span>{
+        <span class="hljs-comment">// Start the session</span>
+        <span class="hljs-title function_ invoke__">session_start</span>();
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-keyword">isset</span>(<span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'user'</span>])) {
+            <span class="hljs-comment">// If user is logged in, display the profile page</span>
+            <span class="hljs-keyword">include</span> <span class="hljs-string">'v/profile.php'</span>;
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-comment">// If user is not logged in, redirect to the login page</span>
+            <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: index.php?controller=User&amp;action=login'</span>);
+            <span class="hljs-keyword">exit</span>;
+        }
+    }
+}
+</code></div></div></pre><p>The <code>UserController</code> is now only responsible for controlling the application flow and delegating data access to the <code>User</code> model. This way, your code will be more organized and easier to maintain as it grows.</p><p>Remember, you may need to handle registration and other actions in the <code>User</code> model as your system evolves.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">ok, good to go. previously, you wrote the profile.php code such that when a user successfully logged-in, it will show the user status with editable for each entity that I will be working on it later. now write the code for me such that when there's No user found with this username, it will show a link to register.php,  if it's Incorrect password, the user can then reset it's password from the give code column in the member table, and finally, write the code to allow the logged-in user updating it's status from the profile.php.</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>Sure, let's start with providing a link to the registration page and password reset page when login fails.</p><ol><li>Update the login method in <code>UserController</code>:</li></ol><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">login</span>() </span>{
+    <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+        <span class="hljs-comment">// Authenticate the user</span>
+        <span class="hljs-variable">$user</span> = <span class="hljs-variable language_">$this</span>-&gt;user-&gt;<span class="hljs-title function_ invoke__">find</span>(<span class="hljs-variable">$_POST</span>[<span class="hljs-string">'username'</span>]);
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$user</span>) {
+            <span class="hljs-keyword">if</span> (<span class="hljs-title function_ invoke__">password_verify</span>(<span class="hljs-variable">$_POST</span>[<span class="hljs-string">'password'</span>], <span class="hljs-variable">$user</span>[<span class="hljs-string">'password'</span>])) {
+                <span class="hljs-comment">// Start the session and store user data</span>
+                <span class="hljs-title function_ invoke__">session_start</span>();
+                <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'user'</span>] = <span class="hljs-variable">$user</span>;
+
+                <span class="hljs-comment">// Redirect to profile page</span>
+                <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: index.php?controller=User&amp;action=profile'</span>);
+                <span class="hljs-keyword">exit</span>;
+            } <span class="hljs-keyword">else</span> {
+                <span class="hljs-comment">// Here, you could redirect back to the login page with a message about the error</span>
+                <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'error'</span>] = <span class="hljs-string">"Incorrect password."</span>;
+                <span class="hljs-keyword">include</span> <span class="hljs-string">'v/login.php'</span>;
+            }
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-comment">// Here, you could redirect back to the login page with a message about the error</span>
+            <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'error'</span>] = <span class="hljs-string">"No user found with this username."</span>;
+            <span class="hljs-keyword">include</span> <span class="hljs-string">'v/login.php'</span>;
+        }
+    } <span class="hljs-keyword">else</span> {
+        <span class="hljs-comment">// Display the login form</span>
+        <span class="hljs-keyword">include</span> <span class="hljs-string">'v/login.php'</span>;
+    }
+}
+</code></div></div></pre><ol start="2"><li>Update <code>login.php</code> to show the error message and links:</li></ol><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>html</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-html"><span class="hljs-tag">&lt;<span class="hljs-name">body</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">h1</span>&gt;</span>Login<span class="hljs-tag">&lt;/<span class="hljs-name">h1</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">form</span> <span class="hljs-attr">action</span>=<span class="hljs-string">"index.php?controller=User&amp;action=login"</span> <span class="hljs-attr">method</span>=<span class="hljs-string">"post"</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">label</span> <span class="hljs-attr">for</span>=<span class="hljs-string">"username"</span>&gt;</span>Username:<span class="hljs-tag">&lt;/<span class="hljs-name">label</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">input</span> <span class="hljs-attr">type</span>=<span class="hljs-string">"text"</span> <span class="hljs-attr">id</span>=<span class="hljs-string">"username"</span> <span class="hljs-attr">name</span>=<span class="hljs-string">"username"</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">label</span> <span class="hljs-attr">for</span>=<span class="hljs-string">"password"</span>&gt;</span>Password:<span class="hljs-tag">&lt;/<span class="hljs-name">label</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">input</span> <span class="hljs-attr">type</span>=<span class="hljs-string">"password"</span> <span class="hljs-attr">id</span>=<span class="hljs-string">"password"</span> <span class="hljs-attr">name</span>=<span class="hljs-string">"password"</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">input</span> <span class="hljs-attr">type</span>=<span class="hljs-string">"submit"</span> <span class="hljs-attr">value</span>=<span class="hljs-string">"Submit"</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-name">form</span>&gt;</span>
+    <span class="hljs-meta">&lt;?php
+    if (isset($_SESSION['error'])) {
+        echo "&lt;p&gt;Error: " . $_SESSION['error'] . "&lt;/p&gt;";
+        if ($_SESSION['error'] == "No user found with this username.") {
+            echo '&lt;p&gt;&lt;a href="index.php?controller=User&amp;action=register"&gt;Register&lt;/a&gt;&lt;/p&gt;';
+        }
+        if ($_SESSION['error'] == "Incorrect password.") {
+            echo '&lt;p&gt;&lt;a href="index.php?controller=User&amp;action=resetPassword"&gt;Reset Password&lt;/a&gt;&lt;/p&gt;';
+        }
+        unset($_SESSION['error']);
+    }
+    ?&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-name">body</span>&gt;</span>
+</code></div></div></pre><p>Now, to allow a user to update their status from <code>profile.php</code>, you'll need to implement the functionality in your <code>UserController</code> and <code>User</code> model.</p><ol><li>Add an updateStatus method to the User model:</li></ol><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">updateStatus</span>(<span class="hljs-params"><span class="hljs-variable">$userId</span>, <span class="hljs-variable">$status</span></span>) </span>{
+    <span class="hljs-variable">$userId</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">escape</span>(<span class="hljs-variable">$userId</span>);
+    <span class="hljs-variable">$status</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">escape</span>(<span class="hljs-variable">$status</span>);
+    
+    <span class="hljs-variable">$result</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">query</span>(<span class="hljs-string">"UPDATE `member` SET `status` = '<span class="hljs-subst">$status</span>' WHERE `id` = '<span class="hljs-subst">$userId</span>'"</span>);
+    
+    <span class="hljs-keyword">return</span> <span class="hljs-variable">$result</span>;
+}
+</code></div></div></pre><ol start="2"><li>Add an updateStatus action in the UserController:</li></ol><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">updateStatus</span>() </span>{
+    <span class="hljs-comment">// Start the session</span>
+    <span class="hljs-title function_ invoke__">session_start</span>();
+
+    <span class="hljs-keyword">if</span> (<span class="hljs-keyword">isset</span>(<span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'user'</span>]) &amp;&amp; <span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+        <span class="hljs-comment">// Update user status</span>
+        <span class="hljs-variable">$status</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'status'</span>];
+        <span class="hljs-variable">$userId</span> = <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'user'</span>][<span class="hljs-string">'id'</span>];
+        <span class="hljs-variable language_">$this</span>-&gt;user-&gt;<span class="hljs-title function_ invoke__">updateStatus</span>(<span class="hljs-variable">$userId</span>, <span class="hljs-variable">$status</span>);
+        
+        <span class="hljs-comment">// Update user status in session</span>
+        <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'user'</span>][<span class="hljs-string">'status'</span>] = <span class="hljs-variable">$status</span>;
+
+        <span class="hljs-comment">// Redirect to profile page</span>
+        <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: index.php?controller=User&amp;action=profile'</span>);
+        <span class="hljs-keyword">exit</span>;
+    } <span class="hljs-keyword">else</span> {
+       
+</code></div></div></pre></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">you did not finish Add an updateStatus action in the UserController, please rewrite the code from where left off</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>I apologize for the unfinished response. Let's continue the <code>updateStatus</code> function in your <code>UserController</code>:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">updateStatus</span>() </span>{
+    <span class="hljs-comment">// Start the session</span>
+    <span class="hljs-title function_ invoke__">session_start</span>();
+
+    <span class="hljs-keyword">if</span> (<span class="hljs-keyword">isset</span>(<span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'user'</span>]) &amp;&amp; <span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+        <span class="hljs-comment">// Update user status</span>
+        <span class="hljs-variable">$status</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'status'</span>];
+        <span class="hljs-variable">$userId</span> = <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'user'</span>][<span class="hljs-string">'id'</span>];
+        <span class="hljs-variable language_">$this</span>-&gt;user-&gt;<span class="hljs-title function_ invoke__">updateStatus</span>(<span class="hljs-variable">$userId</span>, <span class="hljs-variable">$status</span>);
+
+        <span class="hljs-comment">// Update user status in session</span>
+        <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'user'</span>][<span class="hljs-string">'status'</span>] = <span class="hljs-variable">$status</span>;
+
+        <span class="hljs-comment">// Redirect to profile page</span>
+        <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: index.php?controller=User&amp;action=profile'</span>);
+        <span class="hljs-keyword">exit</span>;
+    } <span class="hljs-keyword">else</span> {
+        <span class="hljs-comment">// If user is not logged in, or request is not POST, redirect to login page</span>
+        <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: index.php?controller=User&amp;action=login'</span>);
+        <span class="hljs-keyword">exit</span>;
+    }
+}
+</code></div></div></pre><p>Then, in your <code>profile.php</code>, you can add a form to allow the user to update their status:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>html</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-html"><span class="hljs-tag">&lt;<span class="hljs-name">body</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">h1</span>&gt;</span>Welcome, <span class="hljs-meta">&lt;?php echo $_SESSION['user']['username']; ?&gt;</span>!<span class="hljs-tag">&lt;/<span class="hljs-name">h1</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">p</span>&gt;</span>Status: <span class="hljs-meta">&lt;?php echo $_SESSION['user']['status']; ?&gt;</span><span class="hljs-tag">&lt;/<span class="hljs-name">p</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">form</span> <span class="hljs-attr">action</span>=<span class="hljs-string">"index.php?controller=User&amp;action=updateStatus"</span> <span class="hljs-attr">method</span>=<span class="hljs-string">"post"</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">label</span> <span class="hljs-attr">for</span>=<span class="hljs-string">"status"</span>&gt;</span>Update Status:<span class="hljs-tag">&lt;/<span class="hljs-name">label</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">input</span> <span class="hljs-attr">type</span>=<span class="hljs-string">"text"</span> <span class="hljs-attr">id</span>=<span class="hljs-string">"status"</span> <span class="hljs-attr">name</span>=<span class="hljs-string">"status"</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">input</span> <span class="hljs-attr">type</span>=<span class="hljs-string">"submit"</span> <span class="hljs-attr">value</span>=<span class="hljs-string">"Update Status"</span>&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-name">form</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-name">body</span>&gt;</span>
+</code></div></div></pre><p>This form will POST the new status to the <code>updateStatus</code> action in <code>UserController</code>, which will then update the user's status in the database. After the update is successful, it will redirect back to the profile page, where the user can see their updated status.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">when a new user click the Register link from login.php it will be directed to index.php?controller=User&amp;action=register and the register.php has the code like this:
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+    &lt;title&gt;Register&lt;/title&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;h2&gt;Register&lt;/h2&gt;
+    &lt;form action="?controller=User&amp;action=register" method="post"&gt;
+        &lt;label for="username"&gt;Username:&lt;/label&gt;&lt;br&gt;
+        &lt;input type="text" id="username" name="username"&gt;&lt;br&gt;
+        &lt;label for="password"&gt;Password:&lt;/label&gt;&lt;br&gt;
+        &lt;input type="password" id="password" name="password"&gt;&lt;br&gt;
+        &lt;input type="submit" value="Submit"&gt;
+    &lt;/form&gt; 
+&lt;/body&gt;
+&lt;/html&gt;
+After the user submitted the form, there are no fully provided code in the register() function from UserController class, and none from the model  class User, hense resulting a blank page after the user submitted the form.  please write these code for me.</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>Sure, let's start by updating the <code>register</code> function in the <code>UserController</code> class. In this method, we'll handle both the <code>POST</code> request for creating a new user and the <code>GET</code> request for displaying the registration form. To create a new user, we'll use the <code>create</code> method in the <code>User</code> model, which we'll also need to create.</p><p>In <code>UserController.php</code>:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">register</span>() </span>{
+    <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+        <span class="hljs-comment">// Handle the POST request</span>
+        <span class="hljs-variable">$username</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">escape</span>(<span class="hljs-variable">$_POST</span>[<span class="hljs-string">'username'</span>]);
+        <span class="hljs-variable">$password</span> = <span class="hljs-title function_ invoke__">password_hash</span>(<span class="hljs-variable">$_POST</span>[<span class="hljs-string">'password'</span>], PASSWORD_DEFAULT); <span class="hljs-comment">// Hash the password</span>
+
+        <span class="hljs-variable">$result</span> = <span class="hljs-variable language_">$this</span>-&gt;user-&gt;<span class="hljs-title function_ invoke__">create</span>(<span class="hljs-variable">$username</span>, <span class="hljs-variable">$password</span>);
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$result</span> === <span class="hljs-literal">TRUE</span>) {
+            <span class="hljs-keyword">echo</span> <span class="hljs-string">"User registered successfully. Please login."</span>;
+            <span class="hljs-comment">// Here, you could redirect to the login page</span>
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-keyword">echo</span> <span class="hljs-string">"Error: "</span> . <span class="hljs-variable language_">$this</span>-&gt;user-&gt;db-&gt;link-&gt;error;
+            <span class="hljs-comment">// Here, you could redirect back to the registration page with a message about the error</span>
+        }
+    } <span class="hljs-keyword">else</span> {
+        <span class="hljs-comment">// Handle the GET request</span>
+        <span class="hljs-keyword">include</span> <span class="hljs-string">'v/register.php'</span>;
+    }
+}
+</code></div></div></pre><p>Now, let's create the <code>create</code> method in the <code>User</code> model. This method will take a username and password, and then create a new user in the database.</p><p>In <code>User.php</code>:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">create</span>(<span class="hljs-params"><span class="hljs-variable">$username</span>, <span class="hljs-variable">$password</span></span>) </span>{
+    <span class="hljs-variable">$code</span> = <span class="hljs-variable language_">$this</span>-&gt;<span class="hljs-title function_ invoke__">generateRandomCode</span>(); <span class="hljs-comment">// Generate a random code for password recovery</span>
+    <span class="hljs-variable">$status</span> = <span class="hljs-string">'pending'</span>; <span class="hljs-comment">// New users are 'pending' until approved</span>
+    <span class="hljs-variable">$role</span> = <span class="hljs-string">'member'</span>; <span class="hljs-comment">// New users are 'members' by default</span>
+
+    <span class="hljs-variable">$sql</span> = <span class="hljs-string">"INSERT INTO `member` (`username`, `password`, `code`, `status`, `role`) VALUES ('<span class="hljs-subst">$username</span>', '<span class="hljs-subst">$password</span>', '<span class="hljs-subst">$code</span>', '<span class="hljs-subst">$status</span>', '<span class="hljs-subst">$role</span>')"</span>;
+
+    <span class="hljs-keyword">return</span> <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">query</span>(<span class="hljs-variable">$sql</span>);
+}
+
+<span class="hljs-keyword">private</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">generateRandomCode</span>() </span>{
+    <span class="hljs-comment">// Generate a random 6-digit code for password recovery</span>
+    <span class="hljs-keyword">return</span> <span class="hljs-title function_ invoke__">rand</span>(<span class="hljs-number">100000</span>, <span class="hljs-number">999999</span>);
+}
+</code></div></div></pre><p>With these updates, a new user can fill out the form on <code>register.php</code>, and upon submission, a new user will be created in the database. If the operation is successful, the user will be informed that they have registered successfully and prompted to log in.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">now I got this error reporting:"Warning: Undefined property: UserController::$db in C:\ws\Apache24\htdocs\cf\c\UserController.php on line 28
+
+Fatal error: Uncaught Error: Call to a member function escape() on null in C:\ws\Apache24\htdocs\cf\c\UserController.php:28 Stack trace: #0 C:\ws\Apache24\htdocs\cf\index.php(30): UserController-&gt;register() #1 {main} thrown in C:\ws\Apache24\htdocs\cf\c\UserController.php on line 28" . The code for line 28 from UserController.php is $username = $this-&gt;db-&gt;escape($_POST['username']); why is this and how to solve it.</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>The error message you're seeing indicates that the <code>db</code> property is not defined in the <code>UserController</code> class. We made a refactor in previous steps and now database operations should be performed in the <code>User</code> model, not in the <code>UserController</code>.</p><p>So, rather than escaping the <code>$_POST</code> variables in the controller, we should pass them directly to the <code>create</code> method in the <code>User</code> model, and then do the escaping there. This is because it's the model's responsibility to interact with the database.</p><p>Update the <code>register</code> function in <code>UserController.php</code> like this:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">register</span>() </span>{
+    <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+        <span class="hljs-comment">// Handle the POST request</span>
+        <span class="hljs-variable">$username</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'username'</span>];
+        <span class="hljs-variable">$password</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'password'</span>];
+
+        <span class="hljs-variable">$result</span> = <span class="hljs-variable language_">$this</span>-&gt;user-&gt;<span class="hljs-title function_ invoke__">create</span>(<span class="hljs-variable">$username</span>, <span class="hljs-variable">$password</span>);
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$result</span> === <span class="hljs-literal">TRUE</span>) {
+            <span class="hljs-keyword">echo</span> <span class="hljs-string">"User registered successfully. Please login."</span>;
+            <span class="hljs-comment">// Here, you could redirect to the login page</span>
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-keyword">echo</span> <span class="hljs-string">"Error: "</span> . <span class="hljs-variable language_">$this</span>-&gt;user-&gt;db-&gt;link-&gt;error;
+            <span class="hljs-comment">// Here, you could redirect back to the registration page with a message about the error</span>
+        }
+    } <span class="hljs-keyword">else</span> {
+        <span class="hljs-comment">// Handle the GET request</span>
+        <span class="hljs-keyword">include</span> <span class="hljs-string">'v/register.php'</span>;
+    }
+}
+</code></div></div></pre><p>And update the <code>create</code> function in <code>User.php</code> like this:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">create</span>(<span class="hljs-params"><span class="hljs-variable">$username</span>, <span class="hljs-variable">$password</span></span>) </span>{
+    <span class="hljs-variable">$username</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">escape</span>(<span class="hljs-variable">$username</span>);
+    <span class="hljs-variable">$password</span> = <span class="hljs-title function_ invoke__">password_hash</span>(<span class="hljs-variable">$password</span>, PASSWORD_DEFAULT); <span class="hljs-comment">// Hash the password</span>
+    <span class="hljs-variable">$code</span> = <span class="hljs-variable language_">$this</span>-&gt;<span class="hljs-title function_ invoke__">generateRandomCode</span>(); <span class="hljs-comment">// Generate a random code for password recovery</span>
+    <span class="hljs-variable">$status</span> = <span class="hljs-string">'pending'</span>; <span class="hljs-comment">// New users are 'pending' until approved</span>
+    <span class="hljs-variable">$role</span> = <span class="hljs-string">'member'</span>; <span class="hljs-comment">// New users are 'members' by default</span>
+
+    <span class="hljs-variable">$sql</span> = <span class="hljs-string">"INSERT INTO `member` (`username`, `password`, `code`, `status`, `role`) VALUES ('<span class="hljs-subst">$username</span>', '<span class="hljs-subst">$password</span>', '<span class="hljs-subst">$code</span>', '<span class="hljs-subst">$status</span>', '<span class="hljs-subst">$role</span>')"</span>;
+
+    <span class="hljs-keyword">return</span> <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">query</span>(<span class="hljs-variable">$sql</span>);
+}
+</code></div></div></pre><p>Now the <code>username</code> input will be properly escaped in the <code>User</code> model. This approach follows MVC principles better, as it keeps the concerns of database interaction in the model.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">I told you I'm taking the strict MVC approach for this system, you shouldn't have any database queries in the c folder, and will only do this in the m for model folder. and as this code didn't declare the generateRandomCode() function, please just use php built-in function like rand(100000, 999999); instead. please rewrite the code for me</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>I understand your approach and apologize for misunderstanding your requirements. You're right that in a strict MVC approach, we should not perform any database operations in the controller.</p><p>Here's the modified <code>UserController</code> and <code>User</code> model:</p><p><code>UserController.php</code>:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-meta">&lt;?php</span>
+
+<span class="hljs-keyword">include_once</span> <span class="hljs-string">'m/User.php'</span>;
+
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">UserController</span> </span>{
+    <span class="hljs-keyword">private</span> <span class="hljs-variable">$user</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">__construct</span>() </span>{
+        <span class="hljs-variable language_">$this</span>-&gt;user = <span class="hljs-keyword">new</span> <span class="hljs-title class_">User</span>();
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">register</span>() </span>{
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+            <span class="hljs-variable">$username</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'username'</span>];
+            <span class="hljs-variable">$password</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'password'</span>];
+
+            <span class="hljs-variable">$result</span> = <span class="hljs-variable language_">$this</span>-&gt;user-&gt;<span class="hljs-title function_ invoke__">create</span>(<span class="hljs-variable">$username</span>, <span class="hljs-variable">$password</span>);
+
+            <span class="hljs-keyword">if</span> (<span class="hljs-variable">$result</span> === <span class="hljs-literal">TRUE</span>) {
+                <span class="hljs-keyword">echo</span> <span class="hljs-string">"User registered successfully. Please login."</span>;
+                <span class="hljs-comment">// Here, you could redirect to the login page</span>
+            } <span class="hljs-keyword">else</span> {
+                <span class="hljs-keyword">echo</span> <span class="hljs-string">"Error: "</span> . <span class="hljs-variable">$result</span>;
+                <span class="hljs-comment">// Here, you could redirect back to the registration page with a message about the error</span>
+            }
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-comment">// Display the registration form</span>
+            <span class="hljs-keyword">include</span> <span class="hljs-string">'v/register.php'</span>;
+        }
+    }
+
+    <span class="hljs-comment">// ...rest of the class...</span>
+}
+</code></div></div></pre><p><code>User.php</code>:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-meta">&lt;?php</span>
+
+<span class="hljs-keyword">include_once</span> <span class="hljs-string">'DB.php'</span>;
+
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">User</span> </span>{
+    <span class="hljs-keyword">private</span> <span class="hljs-variable">$db</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">__construct</span>() </span>{
+        <span class="hljs-variable language_">$this</span>-&gt;db = <span class="hljs-keyword">new</span> <span class="hljs-title function_ invoke__">DB</span>();
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">create</span>(<span class="hljs-params"><span class="hljs-variable">$username</span>, <span class="hljs-variable">$password</span></span>) </span>{
+        <span class="hljs-variable">$username</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">escape</span>(<span class="hljs-variable">$username</span>);
+        <span class="hljs-variable">$password</span> = <span class="hljs-title function_ invoke__">password_hash</span>(<span class="hljs-variable">$password</span>, PASSWORD_DEFAULT); <span class="hljs-comment">// Hash the password</span>
+        <span class="hljs-variable">$code</span> = <span class="hljs-title function_ invoke__">rand</span>(<span class="hljs-number">100000</span>, <span class="hljs-number">999999</span>); <span class="hljs-comment">// Generate a random code for password recovery</span>
+        <span class="hljs-variable">$status</span> = <span class="hljs-string">'pending'</span>; <span class="hljs-comment">// New users are 'pending' until approved</span>
+        <span class="hljs-variable">$role</span> = <span class="hljs-string">'member'</span>; <span class="hljs-comment">// New users are 'members' by default</span>
+
+        <span class="hljs-variable">$sql</span> = <span class="hljs-string">"INSERT INTO `member` (`username`, `password`, `code`, `status`, `role`) VALUES ('<span class="hljs-subst">$username</span>', '<span class="hljs-subst">$password</span>', '<span class="hljs-subst">$code</span>', '<span class="hljs-subst">$status</span>', '<span class="hljs-subst">$role</span>')"</span>;
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">query</span>(<span class="hljs-variable">$sql</span>) === <span class="hljs-literal">TRUE</span>) {
+            <span class="hljs-keyword">return</span> <span class="hljs-literal">TRUE</span>;
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-keyword">return</span> <span class="hljs-variable language_">$this</span>-&gt;db-&gt;link-&gt;error;
+        }
+    }
+
+    <span class="hljs-comment">// ...rest of the class...</span>
+}
+</code></div></div></pre><p>Now, the <code>UserController</code> doesn't contain any database-related operations and only manages the control flow. It delegates the task of data handling to the <code>User</code> model. The <code>create</code> method in the <code>User</code> model is now responsible for creating a new user in the database. If there's an error during the database operation, the <code>create</code> method will return the error message, which will be displayed by the <code>UserController</code>.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">now, I want to fine tuning the profile.php, such that only it's role as root or admin in the member table can update it's status or other entities. please revise the code in these 3 files profile.php, UserController.php and User.php accordingly to meet my requirements.</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>Here's the modification you need for your files:</p><p><code>profile.php</code>:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>html</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-html"><span class="hljs-meta">&lt;!DOCTYPE <span class="hljs-keyword">html</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">html</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">head</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">title</span>&gt;</span>Profile<span class="hljs-tag">&lt;/<span class="hljs-name">title</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-name">head</span>&gt;</span>
+<span class="hljs-tag">&lt;<span class="hljs-name">body</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">h2</span>&gt;</span>User Profile<span class="hljs-tag">&lt;/<span class="hljs-name">h2</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">form</span> <span class="hljs-attr">action</span>=<span class="hljs-string">"?controller=User&amp;action=updateStatus"</span> <span class="hljs-attr">method</span>=<span class="hljs-string">"post"</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">label</span> <span class="hljs-attr">for</span>=<span class="hljs-string">"status"</span>&gt;</span>Status:<span class="hljs-tag">&lt;/<span class="hljs-name">label</span>&gt;</span><span class="hljs-tag">&lt;<span class="hljs-name">br</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">input</span> <span class="hljs-attr">type</span>=<span class="hljs-string">"text"</span> <span class="hljs-attr">id</span>=<span class="hljs-string">"status"</span> <span class="hljs-attr">name</span>=<span class="hljs-string">"status"</span> <span class="hljs-attr">value</span>=<span class="hljs-string">"&lt;?php echo $user['status']; ?&gt;"</span>&gt;</span><span class="hljs-tag">&lt;<span class="hljs-name">br</span>&gt;</span>
+        <span class="hljs-meta">&lt;?php
+            // Only allow root or admin users to update status
+            if ($_SESSION['role'] === 'root' || $_SESSION['role'] === 'admin') {
+                echo '&lt;input type="submit" value="Update Status"&gt;';
+            }
+        ?&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-name">form</span>&gt;</span> 
+<span class="hljs-tag">&lt;/<span class="hljs-name">body</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-name">html</span>&gt;</span>
+</code></div></div></pre><p><code>UserController.php</code>:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-meta">&lt;?php</span>
+<span class="hljs-keyword">include_once</span> <span class="hljs-string">'m/User.php'</span>;
+
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">UserController</span> </span>{
+    <span class="hljs-keyword">private</span> <span class="hljs-variable">$user</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">__construct</span>() </span>{
+        <span class="hljs-variable language_">$this</span>-&gt;user = <span class="hljs-keyword">new</span> <span class="hljs-title class_">User</span>();
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">updateStatus</span>() </span>{
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+            <span class="hljs-comment">// Only allow root or admin users to update status</span>
+            <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'role'</span>] === <span class="hljs-string">'root'</span> || <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'role'</span>] === <span class="hljs-string">'admin'</span>) {
+                <span class="hljs-variable">$status</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'status'</span>];
+                <span class="hljs-variable">$result</span> = <span class="hljs-variable language_">$this</span>-&gt;user-&gt;<span class="hljs-title function_ invoke__">updateStatus</span>(<span class="hljs-variable">$status</span>);
+
+                <span class="hljs-keyword">if</span> (<span class="hljs-variable">$result</span> === <span class="hljs-literal">TRUE</span>) {
+                    <span class="hljs-keyword">echo</span> <span class="hljs-string">"Status updated successfully."</span>;
+                } <span class="hljs-keyword">else</span> {
+                    <span class="hljs-keyword">echo</span> <span class="hljs-string">"Error: "</span> . <span class="hljs-variable">$result</span>;
+                }
+            } <span class="hljs-keyword">else</span> {
+                <span class="hljs-keyword">echo</span> <span class="hljs-string">"You are not authorized to update status."</span>;
+            }
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-keyword">include</span> <span class="hljs-string">'v/profile.php'</span>;
+        }
+    }
+
+    <span class="hljs-comment">// ...rest of the class...</span>
+}
+</code></div></div></pre><p><code>User.php</code>:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-meta">&lt;?php</span>
+<span class="hljs-keyword">include_once</span> <span class="hljs-string">'DB.php'</span>;
+
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">User</span> </span>{
+    <span class="hljs-keyword">private</span> <span class="hljs-variable">$db</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">__construct</span>() </span>{
+        <span class="hljs-variable language_">$this</span>-&gt;db = <span class="hljs-keyword">new</span> <span class="hljs-title function_ invoke__">DB</span>();
+    }
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">updateStatus</span>(<span class="hljs-params"><span class="hljs-variable">$status</span></span>) </span>{
+        <span class="hljs-variable">$username</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">escape</span>(<span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'username'</span>]);
+        <span class="hljs-variable">$status</span> = <span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">escape</span>(<span class="hljs-variable">$status</span>);
+
+        <span class="hljs-variable">$sql</span> = <span class="hljs-string">"UPDATE `member` SET `status` = '<span class="hljs-subst">$status</span>' WHERE `username` = '<span class="hljs-subst">$username</span>'"</span>;
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable language_">$this</span>-&gt;db-&gt;<span class="hljs-title function_ invoke__">query</span>(<span class="hljs-variable">$sql</span>) === <span class="hljs-literal">TRUE</span>) {
+            <span class="hljs-keyword">return</span> <span class="hljs-literal">TRUE</span>;
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-keyword">return</span> <span class="hljs-variable language_">$this</span>-&gt;db-&gt;link-&gt;error;
+        }
+    }
+
+    <span class="hljs-comment">// ...rest of the class...</span>
+}
+</code></div></div></pre><p>This code will allow only users with a role of <code>root</code> or <code>admin</code> to update their status. Other users will still be able to view their status but they won't be able to update it.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">I changed the profile.php as this:
+&lt;body&gt;
+    &lt;h2&gt;User Profile&lt;/h2&gt;
+    &lt;form action="?controller=User&amp;action=updateStatus" method="post"&gt;
+        &lt;label for="status"&gt;Status:&lt;/label&gt;&lt;br&gt;
+        &lt;input type="text" id="status" name="status" value="&lt;?php echo $user['status']; ?&gt;"&gt;&lt;br&gt;
+        &lt;?php
+            // Only allow root or admin users to update status
+            if ($_SESSION['role'] === 'root' || $_SESSION['role'] === 'admin') {
+                echo '&lt;input type="submit" value="Update Status"&gt;';
+            }
+        ?&gt;
+    &lt;/form&gt; 
+&lt;/body&gt;
+I know this change won't cause any problems, but when I'm trying to log in even as root with correct password, I got this warning: Warning: Undefined array key "role" in C:\ws\Apache24\htdocs\cf\v\profile.php on line 8. The code line 8 is:             if ($_SESSION['role'] === 'root' || $_SESSION['role'] === 'admin') {. why is this and how to fix</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>The <code>$_SESSION['role']</code> is undefined because the 'role' of the user has not been set in the session data after logging in.</p><p>In the <code>login()</code> method of the UserController, you need to set the 'role' to the session data when the user is successfully authenticated. Here is the updated code for <code>login()</code> method:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">login</span>() </span>{
+    <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+        <span class="hljs-comment">// Authenticate the user</span>
+        <span class="hljs-variable">$username</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'username'</span>];
+        <span class="hljs-variable">$password</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'password'</span>];
+
+        <span class="hljs-variable">$user</span> = <span class="hljs-variable language_">$this</span>-&gt;user-&gt;<span class="hljs-title function_ invoke__">getByUsername</span>(<span class="hljs-variable">$username</span>);
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$user</span>) {
+            <span class="hljs-keyword">if</span> (<span class="hljs-title function_ invoke__">password_verify</span>(<span class="hljs-variable">$password</span>, <span class="hljs-variable">$user</span>[<span class="hljs-string">'password'</span>])) {
+                <span class="hljs-keyword">echo</span> <span class="hljs-string">"User authenticated successfully."</span>;
+                
+                <span class="hljs-comment">// Start a session and store user data</span>
+                <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'username'</span>] = <span class="hljs-variable">$username</span>;
+                <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'role'</span>] = <span class="hljs-variable">$user</span>[<span class="hljs-string">'role'</span>]; <span class="hljs-comment">// Add this line to set the user role in session</span>
+                
+                <span class="hljs-comment">// Redirect to the profile page</span>
+                <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: index.php?controller=User&amp;action=profile'</span>);
+                <span class="hljs-keyword">exit</span>();
+            } <span class="hljs-keyword">else</span> {
+                <span class="hljs-keyword">echo</span> <span class="hljs-string">"Incorrect password."</span>;
+                <span class="hljs-keyword">echo</span> <span class="hljs-string">"&lt;a href='index.php?controller=User&amp;action=resetPassword'&gt;Reset Password&lt;/a&gt;"</span>;
+            }
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-keyword">echo</span> <span class="hljs-string">"No user found with this username."</span>;
+            <span class="hljs-keyword">echo</span> <span class="hljs-string">"&lt;a href='index.php?controller=User&amp;action=register'&gt;Register&lt;/a&gt;"</span>;
+        }
+    } <span class="hljs-keyword">else</span> {
+        <span class="hljs-comment">// Display the login form</span>
+        <span class="hljs-keyword">include</span> <span class="hljs-string">'v/login.php'</span>;
+    }
+}
+</code></div></div></pre><p>With this code, when a user successfully logs in, their role is stored in the session data. This role can then be accessed from the <code>$_SESSION['role']</code> variable on the profile page. Please ensure that session is started before using <code>$_SESSION</code>. It's usually good practice to start a session at the beginning of your script or in a bootstrap file. You can do this by calling <code>session_start()</code>. If the session is not started, <code>$_SESSION</code> will not be available.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">I haven't run the code, cause I noticed you used the getByUsername($username); in the updated login() method, which I did not see it's declared anywhere, it only has a relevant find($username) method in the User class with code like this:
+    public function find($username) {
+        $username = $this-&gt;db-&gt;escape($username);
+        $result = $this-&gt;db-&gt;query("SELECT * FROM `member` WHERE `username` = '$username'");
+        if ($result-&gt;num_rows &gt; 0) {
+            return $result-&gt;row;
+        }
+        return false;
+    }
+are you sure you did all thing right?</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>My apologies for the confusion, you are correct. The method name I used in the UserController class should match the method name in your User model class.</p><p>In the User model, the method to retrieve a user by their username is <code>find($username)</code>, so this should be used in the UserController as well.</p><p>Here's the updated <code>login()</code> method in your UserController:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">login</span>() </span>{
+    <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+        <span class="hljs-comment">// Authenticate the user</span>
+        <span class="hljs-variable">$username</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'username'</span>];
+        <span class="hljs-variable">$password</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'password'</span>];
+
+        <span class="hljs-variable">$user</span> = <span class="hljs-variable language_">$this</span>-&gt;user-&gt;<span class="hljs-title function_ invoke__">find</span>(<span class="hljs-variable">$username</span>);
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$user</span>) {
+            <span class="hljs-keyword">if</span> (<span class="hljs-title function_ invoke__">password_verify</span>(<span class="hljs-variable">$password</span>, <span class="hljs-variable">$user</span>[<span class="hljs-string">'password'</span>])) {
+                <span class="hljs-keyword">echo</span> <span class="hljs-string">"User authenticated successfully."</span>;
+                
+                <span class="hljs-comment">// Start a session and store user data</span>
+                <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'username'</span>] = <span class="hljs-variable">$username</span>;
+                <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'role'</span>] = <span class="hljs-variable">$user</span>[<span class="hljs-string">'role'</span>]; <span class="hljs-comment">// Add this line to set the user role in session</span>
+                
+                <span class="hljs-comment">// Redirect to the profile page</span>
+                <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: index.php?controller=User&amp;action=profile'</span>);
+                <span class="hljs-keyword">exit</span>();
+            } <span class="hljs-keyword">else</span> {
+                <span class="hljs-keyword">echo</span> <span class="hljs-string">"Incorrect password."</span>;
+                <span class="hljs-keyword">echo</span> <span class="hljs-string">"&lt;a href='index.php?controller=User&amp;action=resetPassword'&gt;Reset Password&lt;/a&gt;"</span>;
+            }
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-keyword">echo</span> <span class="hljs-string">"No user found with this username."</span>;
+            <span class="hljs-keyword">echo</span> <span class="hljs-string">"&lt;a href='index.php?controller=User&amp;action=register'&gt;Register&lt;/a&gt;"</span>;
+        }
+    } <span class="hljs-keyword">else</span> {
+        <span class="hljs-comment">// Display the login form</span>
+        <span class="hljs-keyword">include</span> <span class="hljs-string">'v/login.php'</span>;
+    }
+}
+</code></div></div></pre><p>This change should resolve the issues you were having. Remember to replace <code>getByUsername($username)</code> with <code>find($username)</code> in the UserController as shown above.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">now when I successfully logged-in, the page won't direct to the profile.php, what's going on here and how to fix.</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>The most likely reason for this behavior could be that the session has not started before you're trying to set session variables. In PHP, you need to start a session using <code>session_start()</code> before you can store any information in <code>$_SESSION</code> superglobal variables. The <code>session_start()</code> function must be called before any output is sent to the browser.</p><p>You can either call <code>session_start()</code> at the beginning of each script where you use sessions, or you could use an auto_prepend_file directive in your php.ini configuration file to automatically include a script with <code>session_start()</code> on all pages.</p><p>Here's how you can start a session in your UserController:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-meta">&lt;?php</span>
+<span class="hljs-title function_ invoke__">session_start</span>(); <span class="hljs-comment">// Add this line to start a session</span>
+<span class="hljs-class"><span class="hljs-keyword">class</span> <span class="hljs-title">UserController</span> </span>{
+
+    <span class="hljs-keyword">private</span> <span class="hljs-variable">$user</span>;
+
+    <span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">__construct</span>() </span>{
+        <span class="hljs-variable language_">$this</span>-&gt;user = <span class="hljs-keyword">new</span> <span class="hljs-title class_">User</span>();
+    }
+
+    <span class="hljs-comment">// Rest of the class...</span>
+}
+</code></div></div></pre><p>You might want to apply this change across all the PHP files where you are using sessions to store or access data. Remember that session data is temporary and will be lost once the user closes their browser.</p><p>If you have done this and the redirection still doesn't work, it could be due to PHP <code>header()</code> function not working as expected. This could happen if there's any output before calling <code>header()</code>. To debug this, you could check if headers have already been sent using <code>headers_sent()</code> function in PHP.</p><p>If none of this works, please let me know. There could be other issues at play here, such as your PHP configuration, your browser, or even your server setup, and we would need to debug further.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">it was working before I made the modification for the user role in User and UserController classes, and it seems the session part remained the same. I noticed in my login.php it only has links for Register and Reset Password, doesn't provide link to profile.php after successfully logged-in. the full login.php code is like this:
+&lt;body&gt;
+    &lt;h1&gt;Login&lt;/h1&gt;
+    &lt;form action="index.php?controller=User&amp;action=login" method="post"&gt;
+        &lt;label for="username"&gt;Username:&lt;/label&gt;
+        &lt;input type="text" id="username" name="username"&gt;
+        &lt;label for="password"&gt;Password:&lt;/label&gt;
+        &lt;input type="password" id="password" name="password"&gt;
+        &lt;input type="submit" value="Submit"&gt;
+    &lt;/form&gt;
+    &lt;?php
+    if (isset($_SESSION['error'])) {
+        echo "&lt;p&gt;Error: " . $_SESSION['error'] . "&lt;/p&gt;";
+        if ($_SESSION['error'] == "No user found with this username.") {
+            echo '&lt;p&gt;&lt;a href="index.php?controller=User&amp;action=register"&gt;Register&lt;/a&gt;&lt;/p&gt;';
+        }
+        if ($_SESSION['error'] == "Incorrect password.") {
+            echo '&lt;p&gt;&lt;a href="index.php?controller=User&amp;action=resetPassword"&gt;Reset Password&lt;/a&gt;&lt;/p&gt;';
+        }
+        unset($_SESSION['error']);
+    }
+    ?&gt;
+&lt;/body&gt;
+
+is there any problem with this? can you try your best to resolve this problem?</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>I see, the login form will post to the <code>login</code> method of the <code>UserController</code>, and if the login is successful, the <code>login</code> method should redirect to the profile page. If the login isn't successful, it will display an error message. If this error message matches certain conditions, it will provide links to register or reset the password.</p><p>If the redirection after successful login isn't working, the issue is most likely within the <code>login</code> method of <code>UserController</code>. Could you please confirm whether you have <code>ob_start();</code> at the beginning of your <code>index.php</code> file? The <code>header()</code> function can have unexpected results or not work at all if output has already been sent to the browser. Using <code>ob_start();</code> will turn on output buffering, which can prevent this issue.</p><p>If <code>ob_start();</code> is already at the beginning of your <code>index.php</code> file or adding it doesn't resolve the issue, it may be a good idea to use an absolute URL in the <code>header()</code> function call instead of a relative one. Some browsers have been known to have issues with relative URLs in <code>header()</code> function calls. Here's how to use an absolute URL:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: http://localhost/cf/?controller=User&amp;action=profile'</span>);
+</code></div></div></pre><p>I hope this helps, but if you're still having issues, please let me know and we can continue to troubleshoot.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">added the ob_start(); to index.php like this:
+&lt;?php
+ob_start();
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+//loader
+spl_autoload_register(function($class_name){
+    if(file_exists('m/' . $class_name . '.php')) {
+        require_once 'm/' . $class_name . '.php';
+    } else if(file_exists('c/' . $class_name . '.php')) {
+        require_once 'c/' . $class_name . '.php';
+    }
+});
+
+//router
+$controllerName = $_REQUEST['controller'] ?? 'User';
+$actionName = $_REQUEST['action'] ?? 'index';
+
+$controllerClass = ucfirst($controllerName) . "Controller";
+
+if (!class_exists($controllerClass)) {
+    die("Controller does not exist");
+}
+
+$controller = new $controllerClass;
+
+if (!method_exists($controller, $actionName)) {
+    die("Action does not exist");
+}
+
+$controller-&gt;$actionName();
+and changed the header to absolute url did not solve the problem. why it worked before I asked you to fine tuning the profile.php, such that only it's role as root or admin in the member table can update it's status or other entities. please revise the code in these 3 files profile.php, UserController.php and User.php accordingly to meet my requirements. there shouldn't much difference for the sessions</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>I see, and I apologize for the confusion.</p><p>It looks like you're trying to redirect to the <code>profile</code> page after a successful login. However, if you take a look at your <code>login</code> method in the <code>UserController</code> class, it currently doesn't handle any redirection.</p><p>Here is how you can modify the <code>login</code> method in <code>UserController</code> to redirect the user to the <code>profile</code> page after a successful login.</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">login</span>() </span>{
+    <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+        <span class="hljs-variable">$username</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'username'</span>];
+        <span class="hljs-variable">$password</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'password'</span>];
+
+        <span class="hljs-variable">$userModel</span> = <span class="hljs-keyword">new</span> <span class="hljs-title class_">User</span>();
+        <span class="hljs-variable">$user</span> = <span class="hljs-variable">$userModel</span>-&gt;<span class="hljs-title function_ invoke__">find</span>(<span class="hljs-variable">$username</span>);
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$user</span>) {
+            <span class="hljs-keyword">if</span> (<span class="hljs-title function_ invoke__">password_verify</span>(<span class="hljs-variable">$password</span>, <span class="hljs-variable">$user</span>[<span class="hljs-string">'password'</span>])) {
+                <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'username'</span>] = <span class="hljs-variable">$user</span>[<span class="hljs-string">'username'</span>];
+                <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'role'</span>] = <span class="hljs-variable">$user</span>[<span class="hljs-string">'role'</span>];
+                <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'status'</span>] = <span class="hljs-variable">$user</span>[<span class="hljs-string">'status'</span>];
+
+                <span class="hljs-comment">// Redirect to the profile page</span>
+                <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: http://localhost/cf/?controller=User&amp;action=profile'</span>);
+                <span class="hljs-keyword">exit</span>();
+            } <span class="hljs-keyword">else</span> {
+                <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'error'</span>] = <span class="hljs-string">"Incorrect password."</span>;
+                <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: http://localhost/cf/?controller=User&amp;action=login'</span>);
+                <span class="hljs-keyword">exit</span>();
+            }
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'error'</span>] = <span class="hljs-string">"No user found with this username."</span>;
+            <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: http://localhost/cf/?controller=User&amp;action=login'</span>);
+            <span class="hljs-keyword">exit</span>();
+        }
+    } <span class="hljs-keyword">else</span> {
+        <span class="hljs-keyword">include</span> <span class="hljs-string">'v/login.php'</span>;
+    }
+}
+</code></div></div></pre><p>In the updated <code>login</code> method, upon successful login, the user's username, role, and status are stored in the session, and then the user is redirected to the profile page. If the login is not successful, the user is redirected back to the login page with an error message.</p><p>Please replace your current <code>login</code> method with the one above, and then give it a try.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">this did not work. ok, this worked before, at least the page redirected:
+    public function login() {
+        if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+            // Authenticate the user
+            $user = $this-&gt;user-&gt;find($_POST['username']);
+            
+            if ($user) {
+                if (password_verify($_POST['password'], $user['password'])) {
+                    // Start the session and store user data
+                    session_start();
+                    $_SESSION['user'] = $user;
+
+                    // Redirect to profile page
+                    header('Location: index.php?controller=User&amp;action=profile');
+                    exit;
+                } else {
+
+                    //redirect back to the login page with a message about the error
+                    $_SESSION['error'] = "Incorrect password.";
+                    include 'v/login.php';                    
+                }
+            } else {
+                
+                //redirect back to the login page with a message about the error
+                $_SESSION['error'] = "No user found with this username.";
+                include 'v/login.php';
+            }
+        } else {
+            // Display the login form
+            include 'v/login.php';
+        }
+    }
+but this did not work, if the login successful, it won't redirect the page, otherwise it will redirect to Incorrect password.Reset Password or No user found with this username.Register. I just simply want if the login is  successful it will redirect to the profille.php. below is the problematic login() method. please fix it
+    public function login() {
+        if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+            // Authenticate the user
+            $username = $_POST['username'];
+            $password = $_POST['password'];
+
+            $user = $this-&gt;user-&gt;find($username);
+
+            if ($user) {
+                if (password_verify($password, $user['password'])) {
+                    echo "User authenticated successfully.";
+                    
+                    // Start a session and store user data
+                    $_SESSION['username'] = $username;
+                    $_SESSION['role'] = $user['role']; // Add this line to set the user role in session
+                    
+                    // Redirect to the profile page
+                    header('Location: index.php?controller=User&amp;action=profile');
+                    exit();
+                } else {
+                    echo "Incorrect password.";
+                    echo "&lt;a href='index.php?controller=User&amp;action=resetPassword'&gt;Reset Password&lt;/a&gt;";
+                }
+            } else {
+                echo "No user found with this username.";
+                echo "&lt;a href='index.php?controller=User&amp;action=register'&gt;Register&lt;/a&gt;";
+            }
+        } else {
+            // Display the login form
+            include 'v/login.php';
+        }
+    }
+
+</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>I see, I apologize for the confusion. Here's the updated <code>login</code> method. This time, in case of a successful login, the method will start a session, save the user data, and then redirect the user to the profile page. If the login is not successful, the user is redirected back to the login page with an error message.</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">login</span>() </span>{
+    <span class="hljs-title function_ invoke__">session_start</span>();
+    <span class="hljs-keyword">if</span> (<span class="hljs-variable">$_SERVER</span>[<span class="hljs-string">'REQUEST_METHOD'</span>] == <span class="hljs-string">'POST'</span>) {
+        <span class="hljs-comment">// Authenticate the user</span>
+        <span class="hljs-variable">$username</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'username'</span>];
+        <span class="hljs-variable">$password</span> = <span class="hljs-variable">$_POST</span>[<span class="hljs-string">'password'</span>];
+
+        <span class="hljs-variable">$user</span> = <span class="hljs-variable language_">$this</span>-&gt;user-&gt;<span class="hljs-title function_ invoke__">find</span>(<span class="hljs-variable">$username</span>);
+
+        <span class="hljs-keyword">if</span> (<span class="hljs-variable">$user</span>) {
+            <span class="hljs-keyword">if</span> (<span class="hljs-title function_ invoke__">password_verify</span>(<span class="hljs-variable">$password</span>, <span class="hljs-variable">$user</span>[<span class="hljs-string">'password'</span>])) {
+                <span class="hljs-comment">// Store user data in the session</span>
+                <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'username'</span>] = <span class="hljs-variable">$username</span>;
+                <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'role'</span>] = <span class="hljs-variable">$user</span>[<span class="hljs-string">'role'</span>];
+                <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'status'</span>] = <span class="hljs-variable">$user</span>[<span class="hljs-string">'status'</span>];
+                <span class="hljs-comment">// Redirect to the profile page</span>
+                <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: index.php?controller=User&amp;action=profile'</span>);
+                <span class="hljs-keyword">exit</span>();
+            } <span class="hljs-keyword">else</span> {
+                <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'error'</span>] = <span class="hljs-string">"Incorrect password."</span>;
+                <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: index.php?controller=User&amp;action=login'</span>);
+                <span class="hljs-keyword">exit</span>();
+            }
+        } <span class="hljs-keyword">else</span> {
+            <span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'error'</span>] = <span class="hljs-string">"No user found with this username."</span>;
+            <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: index.php?controller=User&amp;action=login'</span>);
+            <span class="hljs-keyword">exit</span>();
+        }
+    } <span class="hljs-keyword">else</span> {
+        <span class="hljs-keyword">include</span> <span class="hljs-string">'v/login.php'</span>;
+    }
+}
+</code></div></div></pre><p>Please replace your current <code>login</code> method with this updated one and give it a try.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">still it doesn't show the user profile after successfully logged-in, otherwise it worked as expected. here are all related files for this issue, I will list one by one, please carefully debug the problem.
+this first one is UserController.php  as this:
+&lt;?php
+require_once 'm/User.php';
+
+class UserController {
+
+    private $user;
+
+    public function __construct() {
+        $this-&gt;user = new User();
+    }
+
+    public function index() {
+        $this-&gt;login();
+    }
+
+    public function register() {
+        if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+            $username = $_POST['username'];
+            $password = $_POST['password'];
+
+            $result = $this-&gt;user-&gt;create($username, $password);
+
+            if ($result === TRUE) {
+                echo "User registered successfully. Please login.";
+                // Here, you could redirect to the login page
+            } else {
+                echo "Error: " . $result;
+                // Here, you could redirect back to the registration page with a message about the error
+            }
+        } else {
+            // Display the registration form
+            include 'v/register.php';
+        }
+    }
+
+    public function login() {
+        session_start();
+        if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+            // Authenticate the user
+            $username = $_POST['username'];
+            $password = $_POST['password'];
+
+            $user = $this-&gt;user-&gt;find($username);
+
+            if ($user) {
+                if (password_verify($password, $user['password'])) {
+                    // Store user data in the session
+                    $_SESSION['username'] = $username;
+                    $_SESSION['role'] = $user['role'];
+                    $_SESSION['status'] = $user['status'];
+                    // Redirect to the profile page
+                    header('Location: index.php?controller=User&amp;action=profile');
+                    exit();
+                } else {
+                    $_SESSION['error'] = "Incorrect password.";
+                    header('Location: index.php?controller=User&amp;action=login');
+                    exit();
+                }
+            } else {
+                $_SESSION['error'] = "No user found with this username.";
+                header('Location: index.php?controller=User&amp;action=login');
+                exit();
+            }
+        } else {
+            include 'v/login.php';
+        }
+    }
+
+    public function profile() {
+        // Start the session
+        session_start();
+
+        if (isset($_SESSION['user'])) {
+            // If user is logged in, display the profile page
+            include 'v/profile.php';
+        } else {
+            // If user is not logged in, redirect to the login page
+            header('Location: index.php?controller=User&amp;action=login');
+            exit;
+        }
+    }
+
+    public function updateStatus() {
+        if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+            // Only allow root or admin users to update status
+            if ($_SESSION['role'] === 'root' || $_SESSION['role'] === 'admin') {
+                $status = $_POST['status'];
+                $result = $this-&gt;user-&gt;updateStatus($status);
+
+                if ($result === TRUE) {
+                    echo "Status updated successfully.";
+                } else {
+                    echo "Error: " . $result;
+                }
+            } else {
+                echo "You are not authorized to update status.";
+            }
+        } else {
+            include 'v/profile.php';
+        }
+    }
+
+
+}
+and the User.php:
+&lt;?php
+require_once 'DB.php';
+
+class User {
+
+    private $db;
+
+    public function __construct() {
+        $this-&gt;db = new DB();
+    }
+
+    public function find($username) {
+        $username = $this-&gt;db-&gt;escape($username);
+        $result = $this-&gt;db-&gt;query("SELECT * FROM `member` WHERE `username` = '$username'");
+        if ($result-&gt;num_rows &gt; 0) {
+            return $result-&gt;row;
+        }
+        return false;
+    }
+
+    public function updateStatus($status) {
+        $username = $this-&gt;db-&gt;escape($_SESSION['username']);
+        $status = $this-&gt;db-&gt;escape($status);
+
+        $sql = "UPDATE `member` SET `status` = '$status' WHERE `username` = '$username'";
+
+        if ($this-&gt;db-&gt;query($sql) === TRUE) {
+            return TRUE;
+        } else {
+            return $this-&gt;db-&gt;link-&gt;error;
+        }
+    }
+
+    public function create($username, $password) {
+        $username = $this-&gt;db-&gt;escape($username);
+        $password = password_hash($password, PASSWORD_DEFAULT); // Hash the password
+        $code = rand(100000, 999999); // Generate a random code for password recovery
+        $status = 'pending'; // New users are 'pending' until approved
+        $role = 'member'; // New users are 'members' by default
+
+        $sql = "INSERT INTO `member` (`username`, `password`, `code`, `status`, `role`) VALUES ('$username', '$password', '$code', '$status', '$role')";
+
+        if ($this-&gt;db-&gt;query($sql) === TRUE) {
+            return TRUE;
+        } else {
+            return $this-&gt;db-&gt;link-&gt;error;
+        }
+    }
+    
+}
+the login.php
+&lt;body&gt;
+    &lt;h1&gt;Login&lt;/h1&gt;
+    &lt;form action="index.php?controller=User&amp;action=login" method="post"&gt;
+        &lt;label for="username"&gt;Username:&lt;/label&gt;
+        &lt;input type="text" id="username" name="username"&gt;
+        &lt;label for="password"&gt;Password:&lt;/label&gt;
+        &lt;input type="password" id="password" name="password"&gt;
+        &lt;input type="submit" value="Submit"&gt;
+    &lt;/form&gt;
+    &lt;?php
+    if (isset($_SESSION['error'])) {
+        echo "&lt;p&gt;Error: " . $_SESSION['error'] . "&lt;/p&gt;";
+        if ($_SESSION['error'] == "No user found with this username.") {
+            echo '&lt;p&gt;&lt;a href="index.php?controller=User&amp;action=register"&gt;Register&lt;/a&gt;&lt;/p&gt;';
+        }
+        if ($_SESSION['error'] == "Incorrect password.") {
+            echo '&lt;p&gt;&lt;a href="index.php?controller=User&amp;action=resetPassword"&gt;Reset Password&lt;/a&gt;&lt;/p&gt;';
+        }
+        unset($_SESSION['error']);
+    }
+    ?&gt;
+&lt;/body&gt;
+and the profile.php
+&lt;body&gt;
+    &lt;h1&gt;Login&lt;/h1&gt;
+    &lt;form action="index.php?controller=User&amp;action=login" method="post"&gt;
+        &lt;label for="username"&gt;Username:&lt;/label&gt;
+        &lt;input type="text" id="username" name="username"&gt;
+        &lt;label for="password"&gt;Password:&lt;/label&gt;
+        &lt;input type="password" id="password" name="password"&gt;
+        &lt;input type="submit" value="Submit"&gt;
+    &lt;/form&gt;
+    &lt;?php
+    if (isset($_SESSION['error'])) {
+        echo "&lt;p&gt;Error: " . $_SESSION['error'] . "&lt;/p&gt;";
+        if ($_SESSION['error'] == "No user found with this username.") {
+            echo '&lt;p&gt;&lt;a href="index.php?controller=User&amp;action=register"&gt;Register&lt;/a&gt;&lt;/p&gt;';
+        }
+        if ($_SESSION['error'] == "Incorrect password.") {
+            echo '&lt;p&gt;&lt;a href="index.php?controller=User&amp;action=resetPassword"&gt;Reset Password&lt;/a&gt;&lt;/p&gt;';
+        }
+        unset($_SESSION['error']);
+    }
+    ?&gt;
+&lt;/body&gt;
+finally the index.php
+&lt;?php
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
+//loader
+spl_autoload_register(function($class_name){
+    if(file_exists('m/' . $class_name . '.php')) {
+        require_once 'm/' . $class_name . '.php';
+    } else if(file_exists('c/' . $class_name . '.php')) {
+        require_once 'c/' . $class_name . '.php';
+    }
+});
+
+//router
+$controllerName = $_REQUEST['controller'] ?? 'User';
+$actionName = $_REQUEST['action'] ?? 'index';
+
+$controllerClass = ucfirst($controllerName) . "Controller";
+
+if (!class_exists($controllerClass)) {
+    die("Controller does not exist");
+}
+
+$controller = new $controllerClass;
+
+if (!method_exists($controller, $actionName)) {
+    die("Action does not exist");
+}
+
+$controller-&gt;$actionName();
+
+I only need when a user successfully logged-in, it will redirect to profile.php to show it's status.</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>I found the issue in your code. The session variable you're setting in the <code>login()</code> function of <code>UserController.php</code> is <code>$_SESSION['username']</code>, <code>$_SESSION['role']</code>, and <code>$_SESSION['status']</code>. However, in the <code>profile()</code> function, you're checking for the existence of <code>$_SESSION['user']</code>.</p><p>To fix this, you need to modify the <code>profile()</code> function to check for the existence of <code>$_SESSION['username']</code> instead. Also, <code>profile.php</code> currently contains the form for logging in, which it shouldn't. You should update it to show the user's profile details. Here are the changes you need to make:</p><p>In <code>UserController.php</code>, update the <code>profile()</code> function:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>php</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-php"><span class="hljs-keyword">public</span> <span class="hljs-function"><span class="hljs-keyword">function</span> <span class="hljs-title">profile</span>() </span>{
+    <span class="hljs-comment">// Start the session</span>
+    <span class="hljs-title function_ invoke__">session_start</span>();
+
+    <span class="hljs-keyword">if</span> (<span class="hljs-keyword">isset</span>(<span class="hljs-variable">$_SESSION</span>[<span class="hljs-string">'username'</span>])) {
+        <span class="hljs-comment">// If user is logged in, display the profile page</span>
+        <span class="hljs-keyword">include</span> <span class="hljs-string">'v/profile.php'</span>;
+    } <span class="hljs-keyword">else</span> {
+        <span class="hljs-comment">// If user is not logged in, redirect to the login page</span>
+        <span class="hljs-title function_ invoke__">header</span>(<span class="hljs-string">'Location: index.php?controller=User&amp;action=login'</span>);
+        <span class="hljs-keyword">exit</span>;
+    }
+}
+</code></div></div></pre><p>In <code>profile.php</code>, you should display the user's profile details:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>html</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-html"><span class="hljs-tag">&lt;<span class="hljs-name">body</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">h1</span>&gt;</span>Profile<span class="hljs-tag">&lt;/<span class="hljs-name">h1</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">p</span>&gt;</span>Username: <span class="hljs-meta">&lt;?php echo $_SESSION['username']; ?&gt;</span><span class="hljs-tag">&lt;/<span class="hljs-name">p</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">p</span>&gt;</span>Role: <span class="hljs-meta">&lt;?php echo $_SESSION['role']; ?&gt;</span><span class="hljs-tag">&lt;/<span class="hljs-name">p</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">p</span>&gt;</span>Status: <span class="hljs-meta">&lt;?php echo $_SESSION['status']; ?&gt;</span><span class="hljs-tag">&lt;/<span class="hljs-name">p</span>&gt;</span>
+<span class="hljs-tag">&lt;/<span class="hljs-name">body</span>&gt;</span>
+</code></div></div></pre><p>Now, when a user successfully logs in, they should be redirected to the <code>profile.php</code> page, which will display their username, role, and status.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">it's finally worked. now, as I mentioned before, I want to fine tuning the profile.php, such that only it's role as root or admin in the member table can update it's status or other entities. you did wrote this code to profile.php as this:
+&lt;body&gt;
+    &lt;h2&gt;User Profile&lt;/h2&gt;
+    &lt;form action="?controller=User&amp;action=updateStatus" method="post"&gt;
+        &lt;label for="status"&gt;Status:&lt;/label&gt;&lt;br&gt;
+        &lt;input type="text" id="status" name="status" value="&lt;?php echo $user['status']; ?&gt;"&gt;&lt;br&gt;
+        &lt;?php
+            // Only allow root or admin users to update status
+            if ($_SESSION['role'] === 'root' || $_SESSION['role'] === 'admin') {
+                echo '&lt;input type="submit" value="Update Status"&gt;';
+            }
+        ?&gt;
+    &lt;/form&gt; 
+&lt;/body&gt;
+but when I successfully logged-in, in the profile page I get this in the text bar: &lt;br /&gt;&lt;b&gt;Warning&lt;/b&gt;:  Undefined variable $user in &lt;b&gt;C:\ws\Apache24\htdocs\cf\v\profile.php&lt;/b&gt; on line &lt;b&gt;5&lt;/b&gt;&lt;br /&gt;&lt;br /&gt;&lt;b&gt;Warning&lt;/b&gt;:  Trying to access array offset on value of type null in &lt;b&gt;C:\ws\Apache24\htdocs\cf\v\profile.php&lt;/b&gt; on line &lt;b&gt;5&lt;/b&gt;&lt;br /&gt;. please fix.</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>The problem lies in the use of <code>$user['status']</code> within <code>profile.php</code>. You have not defined <code>$user</code> within this scope.</p><p>You're storing the user's status in a session variable in <code>UserController.php</code>, so you should be able to access it directly with <code>$_SESSION['status']</code>.</p><p>Here's how you can update the code in <code>profile.php</code> to reflect this:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>html</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-html"><span class="hljs-tag">&lt;<span class="hljs-name">body</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">h2</span>&gt;</span>User Profile<span class="hljs-tag">&lt;/<span class="hljs-name">h2</span>&gt;</span>
+    <span class="hljs-tag">&lt;<span class="hljs-name">form</span> <span class="hljs-attr">action</span>=<span class="hljs-string">"?controller=User&amp;action=updateStatus"</span> <span class="hljs-attr">method</span>=<span class="hljs-string">"post"</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">label</span> <span class="hljs-attr">for</span>=<span class="hljs-string">"status"</span>&gt;</span>Status:<span class="hljs-tag">&lt;/<span class="hljs-name">label</span>&gt;</span><span class="hljs-tag">&lt;<span class="hljs-name">br</span>&gt;</span>
+        <span class="hljs-tag">&lt;<span class="hljs-name">input</span> <span class="hljs-attr">type</span>=<span class="hljs-string">"text"</span> <span class="hljs-attr">id</span>=<span class="hljs-string">"status"</span> <span class="hljs-attr">name</span>=<span class="hljs-string">"status"</span> <span class="hljs-attr">value</span>=<span class="hljs-string">"&lt;?php echo $_SESSION['status']; ?&gt;"</span>&gt;</span><span class="hljs-tag">&lt;<span class="hljs-name">br</span>&gt;</span>
+        <span class="hljs-meta">&lt;?php
+            // Only allow root or admin users to update status
+            if ($_SESSION['role'] === 'root' || $_SESSION['role'] === 'admin') {
+                echo '&lt;input type="submit" value="Update Status"&gt;';
+            }
+        ?&gt;</span>
+    <span class="hljs-tag">&lt;/<span class="hljs-name">form</span>&gt;</span> 
+<span class="hljs-tag">&lt;/<span class="hljs-name">body</span>&gt;</span>
+</code></div></div></pre><p>This should resolve the warnings you were seeing and display the current status of the user in the form field.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">your updated profile.php showed the logged-in user status correctly, but I'm missing the Update Status button even logged-in as root or admin, why is this and how to fix.</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>It appears there might be an issue with your session variable <code>$_SESSION['role']</code> not being correctly set to <code>'root'</code> or <code>'admin'</code>. To help debug this, we can add a line to print out the value of <code>$_SESSION['role']</code> in <code>profile.php</code>.</p><p>Please add the following line after the <code>&lt;form&gt;</code> opening tag in <code>profile.php</code>:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>html</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-html"><span class="hljs-tag">&lt;<span class="hljs-name">p</span>&gt;</span>Role: <span class="hljs-meta">&lt;?php echo $_SESSION['role']; ?&gt;</span><span class="hljs-tag">&lt;/<span class="hljs-name">p</span>&gt;</span>
+</code></div></div></pre><p>This should display the role of the current user on the page. If the role is displayed as <code>'root'</code> or <code>'admin'</code>, the "Update Status" button should appear as per your existing conditional statement.</p><p>If the user's role is not displayed as 'root' or 'admin', it means that the role is not being correctly assigned in the <code>login()</code> method of <code>UserController.php</code> or there is a problem with the <code>find()</code> method in <code>User.php</code> when retrieving the user's role from the database. In this case, you will need to check these methods for errors.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 dark:bg-gray-800"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words">after added the line &lt;p&gt;Role: &lt;?php echo $_SESSION['role']; ?&gt;&lt;/p&gt; to profile.php, it did show Role: root,admin. remember, I've used set type for role column in the member table, and the root user has role as both root and admin. how to fix this issue?</div></div></div></div></div><div class="group w-full text-gray-800 dark:text-gray-100 border-b border-black/10 dark:border-gray-900/50 bg-gray-50 dark:bg-[#444654]"><div class="flex p-4 gap-4 text-base md:gap-6 md:max-w-2xl lg:max-w-xl xl:max-w-3xl md:py-6 lg:px-0 m-auto"><div class="relative flex w-[calc(100%-50px)] flex-col gap-1 md:gap-3 lg:w-[calc(100%-115px)]"><div class="flex flex-grow flex-col gap-3"><div class="min-h-[20px] flex flex-col items-start gap-4 whitespace-pre-wrap break-words"><div class="markdown prose w-full break-words dark:prose-invert light"><p>Ah, I see the problem. The comparison operation <code>===</code> for strings in PHP doesn't work as expected with sets. The issue here is that the <code>$_SESSION['role']</code> string is 'root,admin' and when you compare it with 'root' or 'admin', the comparison is not valid because 'root,admin' is not strictly equal to 'root' or 'admin'.</p><p>The solution for this is to convert the set into an array and then use the <code>in_array()</code> function to check if the role 'root' or 'admin' exists in the array of roles for the current user.</p><p>Here is how you can update the condition in your <code>profile.php</code> file:</p><pre><div class="bg-black rounded-md mb-4"><div class="flex items-center relative text-gray-200 bg-gray-800 px-4 py-2 text-xs font-sans justify-between rounded-t-md"><span>html</span></div><div class="p-4 overflow-y-auto"><code class="!whitespace-pre hljs language-html"><span class="hljs-meta">&lt;?php
+    $roles = explode(',', $_SESSION['role']); // This converts the set into an array
+
+    // Only allow root or admin users to update status
+    if (in_array('root', $roles) || in_array('admin', $roles)) {
+        echo '&lt;input type="submit" value="Update Status"&gt;';
+    }
+?&gt;</span>
+</code></div></div></pre><p>This code will split the <code>$_SESSION['role']</code> string into an array using the comma as the delimiter. The <code>in_array()</code> function then checks if 'root' or 'admin' exists in this array of roles. If either role is found in the array, the "Update Status" button will be displayed.</p></div></div></div><div class="flex justify-between lg:block"><div class="text-gray-400 flex self-end lg:self-center justify-center mt-2 gap-2 md:gap-3 lg:gap-1 lg:absolute lg:top-0 lg:translate-x-full lg:right-0 lg:mt-0 lg:pl-2 visible"></div></div></div></div></div></body></html>
