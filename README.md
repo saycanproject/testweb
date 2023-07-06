@@ -6,3 +6,4 @@ j:ITS add basic business module user has a role as c can create business, and ad
 k:ITS add basic records module.now there are user,business,funding and records total of 4 modules.
 l:ITS add basic records module improments, such that only sufficient shareholders and approve candidates can insert records.
 m:ITS records module working and improved. In the record module user has funds greater than 10% of grand total target for a specific business, and be in approved_candidate_ids from extra_info of settings table can put records, also the option_value from the settings table needs to be approved.All satisfied can then write records.
+n:ITS business,funding and record module improved.
